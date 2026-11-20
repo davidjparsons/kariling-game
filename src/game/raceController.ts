@@ -75,6 +75,8 @@ export class RaceController {
   private time = 0;
   private lastLapShown = 0;
   private shake = 0;
+  /** Per-racer ground samplers for feet/stick placement (use each racer's projection hint). */
+  private groundFns: ((x: number, z: number) => number)[] = [];
   onFinish: ((rows: RaceResultRow[]) => void) | null = null;
   /** Dev/testing only: let an AI drive the player's racer. */
   devAutopilot: BotController | null = null;
@@ -102,6 +104,7 @@ export class RaceController {
       deps.stage.scene.add(view.group);
       this.views.push(view);
     }
+    this.groundFns = this.session.racers.map((r) => (x: number, z: number) => Math.max(0, this.groundAt(x, z, r.hint, false)));
     for (const d of this.session.dogs) {
       const dv = new DogView(d.id);
       deps.stage.scene.add(dv.root);
@@ -348,7 +351,7 @@ export class RaceController {
       const view = this.views[i];
       const tyreGround = this.groundAt(x, z, r.hint, true);
       const runnerGround = Math.max(0, this.groundAt(rx, rz, r.hint, false));
-      view.update(dt, { x, z, heading, rx, rz, rHeading, phys: r.phys, tyreGround, runnerGround });
+      view.update(dt, { x, z, heading, rx, rz, rHeading, phys: r.phys, tyreGround, runnerGround, ground: this.groundFns[i] });
       tagPos.push({ x: rx, y: runnerGround + view.runner.height + 0.45, z: rz, visible: r.setup.id !== this.playerId });
       if (dt <= 0) return;
       const ph = r.phys;

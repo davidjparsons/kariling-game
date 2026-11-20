@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { CharacterAppearance } from '../config/appearance';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { clamp, damp, lerp } from '../core/math';
+import { clamp, damp, lerp, wrapAngle } from '../core/math';
 
 export type RunnerMode =
   | 'idle' | 'run' | 'struggle' | 'chase' | 'fall' | 'recover' | 'shock' | 'stunned' | 'clean' | 'eww'
@@ -49,15 +49,55 @@ function limb(key: string, r0: number, r1: number, len: number): THREE.BufferGeo
   });
 }
 
-/** Joint with a smoothed rotation target. */
+/**
+ * Joint with a smoothed rotation target. `cur` is the smoothed forward-kinematics pose; IK
+ * (legs, pushing arm) may override the object's rotation and blends from `cur`.
+ */
 class Joint {
   target = new THREE.Euler();
+  cur = new THREE.Vector3();
   constructor(public obj: THREE.Object3D) {}
-  apply(dt: number, lambda = 14): void {
-    this.obj.rotation.x = damp(this.obj.rotation.x, this.target.x, lambda, dt);
-    this.obj.rotation.y = damp(this.obj.rotation.y, this.target.y, lambda, dt);
-    this.obj.rotation.z = damp(this.obj.rotation.z, this.target.z, lambda, dt);
+  apply(dt: number, lambda = 14, write = true): void {
+    this.cur.x = damp(this.cur.x, this.target.x, lambda, dt);
+    this.cur.y = damp(this.cur.y, this.target.y, lambda, dt);
+    this.cur.z = damp(this.cur.z, this.target.z, lambda, dt);
+    if (write) this.obj.rotation.set(this.cur.x, this.cur.y, this.cur.z);
   }
+  /** Adopt the object's current rotation as the smoothed pose (after IK wrote it). */
+  sync(): void {
+    this.cur.set(this.obj.rotation.x, this.obj.rotation.y, this.obj.rotation.z);
+  }
+}
+
+/** Ground height (world y) under a world point. */
+export type GroundHeightFn = (x: number, z: number) => number;
+
+/** Analytic two-bone leg (hip Rx·Rz, knee Rx) — ankle offset from the hip joint, in the hip's parent frame. */
+export function legFk(hx: number, hz: number, k: number, L1: number, L2: number, out: THREE.Vector3): THREE.Vector3 {
+  const U = L1 + L2 * Math.cos(k);
+  const W = -L2 * Math.sin(k);
+  const px = U * Math.sin(hz), py = -U * Math.cos(hz), pz = W;
+  const c = Math.cos(hx), s = Math.sin(hx);
+  return out.set(px, py * c - pz * s, py * s + pz * c);
+}
+
+/**
+ * Inverse of `legFk`: hip flexion (x), hip abduction (z) and knee bend (≥ 0, so knees always
+ * bend forward like a real knee) that put the ankle at offset `d` from the hip.
+ */
+export function legIk(d: THREE.Vector3, L1: number, L2: number): { hx: number; hz: number; k: number } {
+  const maxD = (L1 + L2) * 0.999;
+  const D = clamp(d.length(), Math.abs(L1 - L2) + 0.02, maxD);
+  const k = Math.acos(clamp((D * D - L1 * L1 - L2 * L2) / (2 * L1 * L2), -1, 1));
+  const U = L1 + L2 * Math.cos(k);
+  const W = -L2 * Math.sin(k);
+  // Scale the target onto the reachable sphere before splitting it into angles.
+  const sc = D / Math.max(1e-6, d.length());
+  const dx = d.x * sc, dy = d.y * sc, dz = d.z * sc;
+  const hz = Math.asin(clamp(dx / U, -1, 1));
+  const py = -U * Math.cos(hz), pz = W;
+  const hx = Math.atan2(dz, dy) - Math.atan2(pz, py);
+  return { hx: wrapAngle(hx), hz, k };
 }
 
 type MeshFn = (g: THREE.BufferGeometry, m: THREE.Material, parent: THREE.Object3D, x?: number, y?: number, z?: number) => THREE.Mesh;
@@ -71,21 +111,41 @@ export class Runner {
   /** Grip point in the right hand. */
   readonly rightGrip = new THREE.Object3D();
   private body = new THREE.Group();
+  /** Pelvis: carries the hips and the spine. Only translates, so leg IK works in body space. */
+  private pelvis = new THREE.Group();
+  /** Waist joint (bends the upper body) and its content offset back to pelvis space. */
   private torsoPivot = new THREE.Group();
+  private torsoContent = new THREE.Group();
   private headPivot = new THREE.Group();
   private ponytail: THREE.Object3D | null = null;
   private rShoulder!: THREE.Group;
   private rElbow!: THREE.Group;
   private rHand!: THREE.Group;
   private lHand!: THREE.Group;
+  private feet: THREE.Group[] = [];
   private upperLen = 0;
   private lowerLen = 0;
+  private thighLen = 0;
+  private shinLen = 0;
+  private hipX = 0.064;
+  private hipDrop = 0.03;
+  /** Ankle-to-sole distance (body units), from the footwear model. */
+  private sole = 0.048;
+  private nominalPelvis = 0.56;
   private j: Record<'lShoulder' | 'rShoulder' | 'lElbow' | 'rElbow' | 'lHip' | 'rHip' | 'lKnee' | 'rKnee' | 'torso' | 'head', Joint>;
   private phase = 0;
   private bob = 0;
   private baseY = 0;
   private time = 0;
+  /** 0 = FK legs snapped to the ground, 1 = planted-foot leg IK (locomotion). */
+  private ikW = 0;
+  private gaitAmp = 0;
+  private tmpV = new THREE.Vector3();
   private materials: THREE.Material[] = [];
+  /** World ground height sampler for foot placement (null = flat at the root height). */
+  ground: GroundHeightFn | null = null;
+  /** Debug/test: last solved sole heights above the ground under each foot (world m). */
+  readonly footClearance = [0, 0];
   readonly height: number;
   readonly scale: number;
 
@@ -117,47 +177,56 @@ export class Runner {
     };
 
     // Proportions (child units; adults are scaled and get a relatively smaller head).
+    // hipY is provisional — the standing pelvis height is derived from the leg lengths below.
     const hipY = adult ? 0.6 : 0.56;
     const thigh = adult ? 0.29 : 0.27, shin = adult ? 0.28 : 0.26;
     const torsoH = adult ? 0.36 : 0.32;
     const shoulderW = adult ? 0.165 : 0.15;
 
     // ---- pelvis + torso (lathed, flattened front-to-back)
-    this.torsoPivot.position.y = hipY;
-    this.body.add(this.torsoPivot);
-    const shortsLen = look.bottoms === 'shorts' ? 1 : 1;
-    mesh(lathe(`pelvis${adult}`, [[0.001, -0.06], [0.1, -0.05], [0.118, 0.0], [0.112, 0.06], [0.104, 0.09], [0.001, 0.09]], 16, 0.72 * shortsLen), bottoms, this.torsoPivot);
+    // The pelvis carries the hips; the upper body bends at a waist joint on top of it, and the
+    // shirt overlaps the shorts so bending never opens a gap.
+    this.pelvis.position.y = hipY;
+    this.nominalPelvis = hipY;
+    this.body.add(this.pelvis);
+    const waistY = 0.08;
+    this.torsoPivot.position.y = waistY;
+    this.pelvis.add(this.torsoPivot);
+    this.torsoContent.position.y = -waistY;
+    this.torsoPivot.add(this.torsoContent);
+    const tc = this.torsoContent;
+    mesh(lathe(`pelvis${adult}`, [[0.001, -0.075], [0.09, -0.07], [0.116, -0.03], [0.12, 0.0], [0.112, 0.06], [0.104, 0.1], [0.001, 0.1]], 16, 0.74), bottoms, this.pelvis);
     // Waistband.
-    mesh(geo('band', () => new THREE.TorusGeometry(0.106, 0.012, 6, 18).rotateX(Math.PI / 2).scale(1, 1, 0.72)), bottoms, this.torsoPivot, 0, 0.085, 0);
+    mesh(geo('band', () => new THREE.TorusGeometry(0.106, 0.012, 6, 18).rotateX(Math.PI / 2).scale(1, 1, 0.72)), bottoms, this.pelvis, 0, 0.085, 0);
     const torsoPts: [number, number][] = [
-      [0.001, 0.07], [0.104, 0.07], [0.108, 0.12], [0.112, 0.18], [0.122, torsoH * 0.72], [0.128, torsoH * 0.86],
+      [0.001, 0.035], [0.098, 0.035], [0.106, 0.08], [0.109, 0.12], [0.112, 0.18], [0.122, torsoH * 0.72], [0.128, torsoH * 0.86],
       [0.118, torsoH * 0.96], [0.075, torsoH + 0.01], [0.045, torsoH + 0.02], [0.001, torsoH + 0.02],
     ];
     const sleeveless = look.shirt === 'tank';
-    mesh(lathe(`torso${adult}`, torsoPts, 18, 0.66), shirt, this.torsoPivot);
+    mesh(lathe(`torso2${adult}`, torsoPts, 18, 0.68), shirt, tc);
     // Shirt hem + collar.
-    mesh(geo('hem', () => new THREE.TorusGeometry(0.106, 0.009, 6, 18).rotateX(Math.PI / 2).scale(1, 1, 0.68)), shirtDark, this.torsoPivot, 0, 0.075, 0);
+    mesh(geo('hem', () => new THREE.TorusGeometry(0.1, 0.009, 6, 18).rotateX(Math.PI / 2).scale(1, 1, 0.7)), shirtDark, tc, 0, 0.045, 0);
     if (look.shirt === 'jersey') {
       // Side panels + number on the back.
       const stripe = this.m(mat(0xffffff, 0.6));
       for (const s of [-1, 1]) {
-        const p = mesh(geo('jside', () => new THREE.BoxGeometry(0.012, torsoH * 0.6, 0.06)), stripe, this.torsoPivot, s * 0.122, torsoH * 0.5, 0);
+        const p = mesh(geo('jside', () => new THREE.BoxGeometry(0.012, torsoH * 0.6, 0.06)), stripe, tc, s * 0.122, torsoH * 0.5, 0);
         p.rotation.z = s * 0.06;
       }
-      const num = mesh(geo('jnum', () => new THREE.PlaneGeometry(0.09, 0.1)), this.m(new THREE.MeshStandardMaterial({ map: numberTexture(7), transparent: true })), this.torsoPivot, 0, torsoH * 0.62, -0.088);
+      const num = mesh(geo('jnum', () => new THREE.PlaneGeometry(0.09, 0.1)), this.m(new THREE.MeshStandardMaterial({ map: numberTexture(7), transparent: true })), tc, 0, torsoH * 0.62, -0.088);
       num.rotation.y = Math.PI;
     } else if (!sleeveless) {
-      mesh(geo('collar', () => new THREE.TorusGeometry(0.05, 0.011, 6, 16).rotateX(Math.PI / 2 - 0.25)), shirtDark, this.torsoPivot, 0, torsoH + 0.005, 0.008);
+      mesh(geo('collar', () => new THREE.TorusGeometry(0.05, 0.011, 6, 16).rotateX(Math.PI / 2 - 0.25)), shirtDark, tc, 0, torsoH + 0.005, 0.008);
     } else {
       // Tank top: show the shoulders and arm holes.
-      for (const s of [-1, 1]) mesh(geo('shoulderSkin', () => new THREE.SphereGeometry(0.046, 10, 8)), skin, this.torsoPivot, s * shoulderW, torsoH - 0.02, 0);
+      for (const s of [-1, 1]) mesh(geo('shoulderSkin', () => new THREE.SphereGeometry(0.046, 10, 8)), skin, tc, s * shoulderW, torsoH - 0.02, 0);
     }
     // Neck.
-    mesh(geo('neck', () => new THREE.CylinderGeometry(0.036, 0.042, 0.08, 10)), skin, this.torsoPivot, 0, torsoH + 0.04, 0);
+    mesh(geo('neck', () => new THREE.CylinderGeometry(0.036, 0.042, 0.08, 10)), skin, tc, 0, torsoH + 0.04, 0);
 
     // ---- head
     this.headPivot.position.y = torsoH + 0.07;
-    this.torsoPivot.add(this.headPivot);
+    tc.add(this.headPivot);
     const headR = adult ? 0.118 : 0.132;
     this.buildFace(headR, skin, white, iris, black, lip, hairM, mesh, look);
 
@@ -167,7 +236,7 @@ export class Runner {
     const mkArm = (side: number) => {
       const shoulder = new THREE.Group();
       shoulder.position.set(side * shoulderW, torsoH - 0.035, 0);
-      this.torsoPivot.add(shoulder);
+      tc.add(shoulder);
       const upperM = sleeveless ? skin : shirt;
       mesh(geo('deltoid', () => new THREE.SphereGeometry(0.044, 10, 8)), upperM, shoulder);
       if (!sleeveless) {
@@ -196,25 +265,42 @@ export class Runner {
     this.rHand.add(this.rightGrip);
 
     // ---- legs
+    // Hips hang from the pelvis (not the body root), so legs stay attached however the body moves.
+    // Each joint has a ball matching the limb radii either side, so bends never open a gap.
+    this.thighLen = thigh;
+    this.shinLen = shin;
+    this.sole = look.footwear === 'sneakers' ? 0.05 : look.footwear === 'sandals' ? 0.048 : 0.042;
+    // Stand with the knees very slightly bent and the soles exactly on the ground.
+    this.nominalPelvis = this.sole + (thigh + shin) * 0.975 + this.hipDrop;
+    this.pelvis.position.y = this.nominalPelvis;
+    this.height += (this.nominalPelvis - hipY) * this.scale;
     const mkLeg = (side: number) => {
       const hip = new THREE.Group();
-      hip.position.set(side * 0.064, hipY - 0.03, 0);
-      this.body.add(hip);
+      hip.position.set(side * this.hipX, -this.hipDrop, 0);
+      this.pelvis.add(hip);
       const trousers = look.bottoms === 'trousers';
-      // Shorts leg (flared) then skin, or full trousers.
-      mesh(limb(`shortLeg${adult}`, 0.062, 0.066, thigh * (trousers ? 1 : 0.62)), bottoms, hip);
-      if (!trousers) mesh(limb(`thighSkin${adult}`, 0.048, 0.04, thigh * 0.42), skin, hip, 0, -thigh * 0.58, 0);
+      mesh(geo('hipBall', () => new THREE.SphereGeometry(0.062, 10, 8)), bottoms, hip);
+      if (trousers) {
+        mesh(limb(`trouserThigh${adult}`, 0.061, 0.05, thigh), bottoms, hip);
+      } else {
+        // Shorts leg (flared) then skin.
+        mesh(limb(`shortLeg${adult}`, 0.062, 0.066, thigh * 0.62), bottoms, hip);
+        mesh(limb(`thighSkin${adult}`, 0.048, 0.04, thigh * 0.42), skin, hip, 0, -thigh * 0.58, 0);
+      }
       const knee = new THREE.Group();
       knee.position.y = -thigh;
       hip.add(knee);
-      mesh(geo('kneeJ', () => new THREE.SphereGeometry(0.041, 8, 6)), trousers ? bottoms : skin, knee);
-      mesh(limb(`shin${adult}${trousers}`, trousers ? 0.046 : 0.039, trousers ? 0.044 : 0.03, shin), trousers ? bottoms : skin, knee);
-      // Calf bulge at the back.
+      mesh(geo(`kneeJ${trousers}`, () => new THREE.SphereGeometry(trousers ? 0.05 : 0.041, 10, 8)), trousers ? bottoms : skin, knee);
+      mesh(limb(`shin2${adult}${trousers}`, trousers ? 0.049 : 0.039, trousers ? 0.041 : 0.03, shin), trousers ? bottoms : skin, knee);
+      // Calf bulge at the back (inside the trouser leg when worn).
       if (!trousers) mesh(geo('calf', () => new THREE.SphereGeometry(0.036, 8, 6).scale(0.9, 1.6, 0.9)), skin, knee, 0, -shin * 0.35, -0.01);
       const foot = new THREE.Group();
       foot.position.y = -shin;
       knee.add(foot);
+      // Ankle ball bridges shin and foot.
+      mesh(geo('ankleJ', () => new THREE.SphereGeometry(0.03, 8, 6)), trousers ? bottoms : skin, foot);
       this.buildFoot(foot, look, skin, shoe, sole, mesh);
+      this.feet.push(foot);
       return { hip, knee };
     };
     const lLeg = mkLeg(1);
@@ -440,8 +526,15 @@ export class Runner {
     this.time += dt;
     const j = this.j;
     const run = clamp(a.speed / 7, 0, 1);
-    const stride = 0.6 + a.speed * 0.12;
-    this.phase += (a.speed / stride) * Math.PI * dt;
+    // Gait: the stance foot moves back under the body at body speed (planted in the world).
+    // Step amplitude is capped by leg length; cadence rises to match speed (capped, after which
+    // the feet are allowed to slip a little rather than splaying into impossible strides).
+    const legLen = this.thighLen + this.shinLen;
+    const stepAmp = Math.min(legLen * 0.5, (0.45 + a.speed * 0.1) / (Math.PI * this.scale));
+    const localSpeed = a.speed / this.scale;
+    const cadence = a.speed > 0.05 ? Math.min(17, localSpeed / Math.max(0.05, stepAmp)) : 0;
+    this.phase += cadence * dt;
+    this.gaitAmp = damp(this.gaitAmp, a.speed > 0.3 ? stepAmp : 0, 8, dt);
     const p = this.phase;
     const sinP = Math.sin(p), cosP = Math.cos(p);
     let bobTarget = 0;
@@ -455,7 +548,7 @@ export class Runner {
       j.rHip.target.x = sinP * 0.85 * amp;
       j.lKnee.target.x = (0.15 + Math.max(0, cosP) * 1.3) * amp;
       j.rKnee.target.x = (0.15 + Math.max(0, -cosP) * 1.3) * amp;
-      bobTarget = Math.abs(sinP) * 0.055 * amp;
+      bobTarget = (0.5 + 0.5 * Math.cos(2 * p)) * 0.035 * amp;
     };
 
     switch (a.mode) {
@@ -505,7 +598,6 @@ export class Runner {
         j.rShoulder.target.set(-2.0 - flail, 0, -0.7);
         j.lHip.target.x = -0.6; j.rHip.target.x = 0.3;
         j.lKnee.target.x = 0.9; j.rKnee.target.x = 0.5;
-        bodyY = -Math.min(1, a.modeTime * 3) * 0.1;
         lambda = 18;
         break;
       }
@@ -526,7 +618,6 @@ export class Runner {
         } else {
           j.lShoulder.target.set(-1.0 * k, 0, 0.3);
         }
-        bodyY = -0.2 * k;
         break;
       }
       case 'shock': {
@@ -545,7 +636,7 @@ export class Runner {
         j.lShoulder.target.set(-0.3, 0, 0.6 + Math.sin(t * 6) * 0.3);
         j.rShoulder.target.set(-0.5, 0, -0.5);
         j.lKnee.target.x = 0.35; j.rKnee.target.x = 0.35;
-        bodyY = -0.04;
+        j.lHip.target.x = -0.2; j.rHip.target.x = -0.2;
         break;
       }
       case 'eww': {
@@ -582,11 +673,109 @@ export class Runner {
         break;
       }
     }
+    const loco = a.mode === 'idle' || a.mode === 'run' || a.mode === 'struggle' || a.mode === 'chase' || a.mode === 'eww';
     for (const k of Object.values(j)) k.apply(dt, lambda);
     this.bob = damp(this.bob, bobTarget, 20, dt);
     this.baseY = damp(this.baseY, bodyY, 12, dt);
-    this.body.position.y = this.baseY + this.bob;
+    this.ikW = damp(this.ikW, loco ? 1 : 0, 10, dt);
+    this.solveLegs(sinP, cosP, run, a.mode === 'celebrate' || a.mode === 'cheer');
     if (this.ponytail) this.ponytail.rotation.x = lerp(0.1, 0.8, run) + Math.sin(p * 2) * 0.25 * run;
+  }
+
+  /** Ground height in body units relative to the root, under a body-space (x, z) point. */
+  private groundLocal(lx: number, lz: number): number {
+    if (!this.ground) return 0;
+    const r = this.root, sc = this.scale;
+    const cy = Math.cos(r.rotation.y), sy = Math.sin(r.rotation.y);
+    const wx = r.position.x + (lx * cy + lz * sy) * sc;
+    const wz = r.position.z + (-lx * sy + lz * cy) * sc;
+    return (this.ground(wx, wz) - r.position.y) / sc;
+  }
+
+  /**
+   * Place the legs on the ground. Locomotion uses planted-foot two-bone IK (feet follow the
+   * terrain under each foot, knees always bend forward, the pelvis drops just enough for both
+   * feet to reach). Other poses keep their FK legs but the pelvis is moved so the lowest foot
+   * rests exactly on the ground — no sinking into the road, no hovering on humps.
+   */
+  private solveLegs(sinP: number, cosP: number, run: number, hopping: boolean): void {
+    const L1 = this.thighLen, L2 = this.shinLen;
+    const w = this.ikW;
+    const legs = [
+      { side: 1, hip: this.j.lHip, knee: this.j.lKnee, foot: this.feet[0] },
+      { side: -1, hip: this.j.rHip, knee: this.j.rKnee, foot: this.feet[1] },
+    ];
+    const tmp = this.tmpV;
+
+    // ---- FK pelvis: lowest foot on the ground.
+    let pFK = this.nominalPelvis;
+    const fkGround = [0, 0];
+    if (w < 0.999) {
+      pFK = -Infinity;
+      legs.forEach((l, i) => {
+        legFk(l.hip.cur.x, l.hip.cur.z, l.knee.cur.x, L1, L2, tmp);
+        const ax = l.side * this.hipX + tmp.x, az = tmp.z;
+        const g = this.groundLocal(ax, az);
+        fkGround[i] = g;
+        pFK = Math.max(pFK, g + this.sole + this.hipDrop - tmp.y);
+      });
+      pFK += this.baseY / this.scale;
+    }
+
+    // ---- IK targets: planted stance foot, lifted swing foot, following the ground slope.
+    const targets: { x: number; y: number; z: number; pitch: number; swing: number }[] = [];
+    let pIK = this.nominalPelvis;
+    if (w > 0.001) {
+      const ampNorm = clamp(this.gaitAmp / 0.12, 0, 1);
+      let gSum = 0;
+      for (const l of legs) {
+        const z = this.gaitAmp * sinP * l.side;
+        const swing = Math.max(0, cosP * l.side) * ampNorm;
+        const x = l.side * (this.hipX + 0.006);
+        const gF = this.groundLocal(x, z + 0.07), gB = this.groundLocal(x, z - 0.07);
+        const g = Math.max(gF, gB, (gF + gB) / 2);
+        gSum += g;
+        targets.push({ x, y: g + this.sole + swing * (0.035 + 0.09 * run), z, pitch: Math.atan2(gF - gB, 0.14), swing });
+      }
+      pIK = gSum / 2 + this.nominalPelvis - 0.035 * run + this.bob / this.scale;
+      const reach = (L1 + L2) * 0.985;
+      legs.forEach((l, i) => {
+        const t = targets[i];
+        const hx = t.x - l.side * this.hipX;
+        const horiz2 = hx * hx + t.z * t.z;
+        pIK = Math.min(pIK, t.y + Math.sqrt(Math.max(0, reach * reach - horiz2)) + this.hipDrop);
+      });
+    }
+
+    const pelvisY = lerp(pFK, pIK, w);
+    this.pelvis.position.y = pelvisY;
+    this.body.position.y = 0;
+
+    legs.forEach((l, i) => {
+      const hipObj = l.hip.obj, kneeObj = l.knee.obj;
+      let hx = l.hip.cur.x, hz = l.hip.cur.z, k = l.knee.cur.x;
+      // Feet stay flat on the ground in FK poses.
+      let pitch = -(hx + k);
+      if (w > 0.001) {
+        const t = targets[i];
+        const d = tmp.set(t.x - l.side * this.hipX, t.y - (pelvisY - this.hipDrop), t.z);
+        const ik = legIk(d, L1, L2);
+        hx = lerp(hx, ik.hx, w);
+        hz = lerp(hz, ik.hz, w);
+        k = lerp(k, ik.k, w);
+        // Flat on the slope in stance, toes dipping as the foot swings through.
+        pitch = lerp(pitch, -t.pitch + 0.45 * t.swing - (hx + k), w);
+      }
+      hipObj.rotation.set(hx, l.hip.cur.y, hz);
+      kneeObj.rotation.set(Math.max(0, k), 0, 0);
+      l.foot.rotation.set(hopping ? pitch * 0.5 : pitch, 0, -hz);
+      // Measure the result (sole height above ground, world metres) for tests and debugging.
+      legFk(hx, hz, Math.max(0, k), L1, L2, tmp);
+      const ax = l.side * this.hipX + tmp.x, az = tmp.z;
+      const ankleY = pelvisY - this.hipDrop + tmp.y;
+      const g = w > 0.5 ? this.groundLocal(ax, az) : fkGround[i];
+      this.footClearance[i] = (ankleY - this.sole - g) * this.scale;
+    });
   }
 
   /**
@@ -594,42 +783,46 @@ export class Runner {
    * Returns how far the grip still is from the target (0 = reached).
    */
   aimRightHand(target: THREE.Vector3): number {
-    const parent = this.torsoPivot;
+    const parent = this.rShoulder.parent!;
     parent.updateWorldMatrix(true, false);
     const tl = parent.worldToLocal(target.clone());
     const s = this.rShoulder.position;
-    const d = tl.clone().sub(s);
     const L1 = this.upperLen, L2 = this.lowerLen + 0.045;
-    const dist = clamp(d.length(), 0.05, L1 + L2 - 1e-3);
-    const dir = d.normalize();
-    // Elbow points down/back/outward (right side = −x).
-    const pole = new THREE.Vector3(-0.4, -1, -0.6).normalize();
-    const bendAxis = new THREE.Vector3().crossVectors(dir, pole).normalize();
-    const a1 = Math.acos(clamp((L1 * L1 + dist * dist - L2 * L2) / (2 * L1 * dist), -1, 1));
-    const elbowInterior = Math.acos(clamp((L1 * L1 + L2 * L2 - dist * dist) / (2 * L1 * L2), -1, 1));
-    const upperDir = dir.clone().applyAxisAngle(bendAxis, -a1);
-    // Shoulder basis: −Y along the upper arm, X along the bend axis.
-    const y = upperDir.clone().negate();
-    const x = bendAxis.clone().sub(y.clone().multiplyScalar(bendAxis.dot(y))).normalize();
-    const z = new THREE.Vector3().crossVectors(x, y);
+    const d = tl.clone().sub(s);
+    const D = clamp(d.length(), Math.abs(L1 - L2) + 0.03, L1 + L2 - 1e-3);
+    const dir = d.lengthSq() > 1e-8 ? d.normalize() : new THREE.Vector3(0, -1, 0);
+    // Elbow hint: down, back and out to the right (right side = −x), like a real pushing arm.
+    const pole = new THREE.Vector3(-0.45, -0.55, -0.7);
+    const perp = pole.sub(dir.clone().multiplyScalar(pole.dot(dir)));
+    if (perp.lengthSq() < 1e-6) perp.set(-1, 0, 0);
+    perp.normalize();
+    // Law of cosines: the elbow sits on the pole side of the shoulder→hand line.
+    const cosA = clamp((L1 * L1 + D * D - L2 * L2) / (2 * L1 * D), -1, 1);
+    const sinA = Math.sqrt(1 - cosA * cosA);
+    const upper = dir.clone().multiplyScalar(cosA).addScaledVector(perp, sinA).normalize();
+    const elbowPos = s.clone().addScaledVector(upper, L1);
+    const handPos = s.clone().addScaledVector(dir, D);
+    const fore = handPos.sub(elbowPos).normalize();
+    // Shoulder basis: local −Y along the upper arm; local +Z towards the forearm side, so the
+    // elbow bends with a negative X rotation (the anatomical direction used by every FK pose).
+    const y = upper.clone().negate();
+    const z = fore.clone().sub(upper.clone().multiplyScalar(fore.dot(upper)));
+    if (z.lengthSq() < 1e-6) z.copy(perp).negate();
+    z.normalize();
+    const x = new THREE.Vector3().crossVectors(y, z);
     this.rShoulder.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z));
-    const bend = Math.PI - elbowInterior;
-    // Pick the elbow direction that actually points the forearm at the target.
-    const elbowPos = s.clone().add(upperDir.clone().multiplyScalar(L1));
-    const toT = tl.clone().sub(elbowPos).normalize();
-    let best = 0, bestDot = -Infinity;
-    for (const sign of [1, -1]) {
-      const fore = new THREE.Vector3(0, -1, 0).applyAxisAngle(new THREE.Vector3(1, 0, 0), sign * bend).applyQuaternion(this.rShoulder.quaternion);
-      const dot = fore.dot(toT);
-      if (dot > bestDot) { bestDot = dot; best = sign; }
-    }
-    this.rElbow.rotation.set(best * bend, 0, 0);
-    this.rElbow.quaternion.setFromEuler(this.rElbow.rotation);
-    // Keep the joint targets in sync so the next frame blends from here.
-    this.j.rShoulder.target.copy(this.rShoulder.rotation);
-    this.j.rElbow.target.copy(this.rElbow.rotation);
+    const bend = Math.acos(clamp(upper.dot(fore), -1, 1));
+    this.rElbow.rotation.set(-bend, 0, 0);
+    // Keep the smoothed FK state in sync so releasing the stick blends from here.
+    this.j.rShoulder.sync();
+    this.j.rElbow.sync();
     this.root.updateMatrixWorld(true);
     return this.rightGrip.getWorldPosition(new THREE.Vector3()).distanceTo(target);
+  }
+
+  /** World position of the right shoulder joint (for planning the stick). */
+  rightShoulderWorld(out: THREE.Vector3): THREE.Vector3 {
+    return this.rShoulder.getWorldPosition(out);
   }
 
   /** World orientation of the right hand (for aligning the stick in FK poses). */

@@ -144,12 +144,12 @@ export function buildHazards(field: HazardField, shadows: boolean): HazardBuild 
         const g = blobGeometry(h.halfLen, h.halfWid, 20, rng, 0.18);
         const m = decal(new THREE.MeshStandardMaterial({ color: 0x3e3427, roughness: 0.95 }));
         const mesh = new THREE.Mesh(g, m);
-        mesh.applyMatrix4(mat4(0, 0.045, 0).premultiply(base));
+        mesh.applyMatrix4(mat4(0, 0.012, 0).premultiply(base));
         mesh.receiveShadow = true;
         group.add(mesh);
         const water = new THREE.Mesh(blobGeometry(h.halfLen * 0.55, h.halfWid * 0.5, 14, rng, 0.2),
           decal(new THREE.MeshStandardMaterial({ color: 0x5b6b70, roughness: 0.08, metalness: 0.2 })));
-        water.applyMatrix4(mat4(0.05, 0.048, 0).premultiply(base));
+        water.applyMatrix4(mat4(0.05, 0.014, 0).premultiply(base));
         group.add(water);
         // Broken rim chunks.
         for (let i = 0; i < 7; i++) {
@@ -162,20 +162,20 @@ export function buildHazards(field: HazardField, shadows: boolean): HazardBuild 
       case 'mud': {
         const g = blobGeometry(h.halfLen, h.halfWid, 28, rng, 0.22);
         const mesh = new THREE.Mesh(g, decal(new THREE.MeshStandardMaterial({ color: 0x5a3d22, roughness: 0.35 })));
-        mesh.applyMatrix4(mat4(0, 0.04, 0).premultiply(base));
+        mesh.applyMatrix4(mat4(0, 0.01, 0).premultiply(base));
         mesh.receiveShadow = true;
         group.add(mesh);
         for (let i = 0; i < 3; i++) {
           const pud = new THREE.Mesh(blobGeometry(rng.range(0.4, 0.8), rng.range(0.3, 0.6), 12, rng, 0.25),
             decal(new THREE.MeshStandardMaterial({ color: 0x6f5a45, roughness: 0.05, metalness: 0.15 })));
-          pud.applyMatrix4(mat4(rng.range(-h.halfWid * 0.5, h.halfWid * 0.5), 0.043, rng.range(-h.halfLen * 0.6, h.halfLen * 0.6), rng.range(0, 6)).premultiply(base));
+          pud.applyMatrix4(mat4(rng.range(-h.halfWid * 0.5, h.halfWid * 0.5), 0.012, rng.range(-h.halfLen * 0.6, h.halfLen * 0.6), rng.range(0, 6)).premultiply(base));
           group.add(pud);
         }
         // Tyre ruts.
         for (const x of [-0.6, 0.7]) {
           const rut = new THREE.Mesh(new THREE.PlaneGeometry(0.12, len * 0.85), decal(new THREE.MeshStandardMaterial({ color: 0x3f2a16, roughness: 0.5 })));
           rut.rotation.x = -Math.PI / 2;
-          rut.applyMatrix4(mat4(x, 0.046, 0, 0.05).premultiply(base));
+          rut.applyMatrix4(mat4(x, 0.013, 0, 0.05).premultiply(base));
           group.add(rut);
         }
         break;
@@ -191,13 +191,13 @@ export function buildHazards(field: HazardField, shadows: boolean): HazardBuild 
         for (let i = 0; i < 3; i++) {
           const m = decal(new THREE.MeshStandardMaterial({ color: 0xffb300, emissive: 0xff6d00, emissiveIntensity: 0.6, roughness: 0.4 }));
           const mesh = new THREE.Mesh(cg, m);
-          mesh.applyMatrix4(mat4(0, 0.05, -h.halfLen + 0.6 + i * 1.2).premultiply(base));
+          mesh.applyMatrix4(mat4(0, 0.016, -h.halfLen + 0.6 + i * 1.2).premultiply(base));
           group.add(mesh);
           mats.push(m);
         }
         const border = new THREE.Mesh(new THREE.PlaneGeometry(wid + 0.2, len + 0.2), decal(new THREE.MeshStandardMaterial({ color: 0x1e88e5, roughness: 0.6 })));
         border.rotation.x = -Math.PI / 2;
-        border.applyMatrix4(mat4(0, 0.042, 0).premultiply(base));
+        border.applyMatrix4(mat4(0, 0.01, 0).premultiply(base));
         group.add(border);
         animated.push((t) => mats.forEach((m, i) => { m.emissiveIntensity = 0.4 + 1.6 * Math.max(0, Math.sin(t * 7 - i * 1.2)); }));
         break;

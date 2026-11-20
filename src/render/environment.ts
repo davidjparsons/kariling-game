@@ -83,6 +83,13 @@ export interface EnvironmentBuild {
   dispose(): void;
 }
 
+/**
+ * Height of the road ribbon. The simulation's ground plane is y = 0, so road-level decals sit
+ * only millimetres above it (polygon offset does the rest) — tyres and feet then rest on the
+ * visible surface instead of sinking a few centimetres into it.
+ */
+export const ROAD_Y = 0.004;
+
 export function buildEnvironment(track: Track, q: QualityProfile, seed = 1, field?: HazardField): EnvironmentBuild {
   /** Is (x, z) in or right beside a canal trench? */
   const inCanalZone = (x: number, z: number, extra: number): boolean => {
@@ -193,7 +200,7 @@ export function buildEnvironment(track: Track, q: QualityProfile, seed = 1, fiel
       if (field?.hasCanal(sAt, 1)) { offs[5] = hw + 0.05; alphas[5] = 1; }
       const shades = [0.92, 0.95, 1.03, 1.03, 0.95, 0.92];
       for (let k = 0; k < cols; k++) {
-        pos.push(smp.x + smp.nx * offs[k], 0.03, smp.z + smp.nz * offs[k]);
+        pos.push(smp.x + smp.nx * offs[k], ROAD_Y, smp.z + smp.nz * offs[k]);
         col.push(rc.r * shades[k], rc.g * shades[k], rc.b * shades[k], alphas[k]);
         uv.push(offs[k] / 4, (i * track.spacing) / 4);
       }
@@ -235,7 +242,7 @@ export function buildEnvironment(track: Track, q: QualityProfile, seed = 1, fiel
           const al = [1, 1, 0];
           for (let k = 0; k < 3; k++) {
             const sd = c.side * ds[k];
-            pos.push(pt.x + pt.nx * sd, 0.012, pt.z + pt.nz * sd);
+            pos.push(pt.x + pt.nx * sd, 0.003, pt.z + pt.nz * sd);
             col.push(grass.r, grass.g, grass.b, al[k]);
             uv.push(ds[k] / 3, (i * span) / steps / 3);
           }
@@ -280,7 +287,7 @@ export function buildEnvironment(track: Track, q: QualityProfile, seed = 1, fiel
     line.rotation.order = 'YXZ';
     line.rotation.y = sp.heading;
     line.rotation.x = -Math.PI / 2;
-    line.position.set(sp.x, 0.045, sp.z);
+    line.position.set(sp.x, ROAD_Y + 0.008, sp.z);
     line.receiveShadow = true;
     group.add(line);
 

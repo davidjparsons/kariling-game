@@ -4,9 +4,10 @@ import { STICK_LENGTH } from '../config/gameplay';
 import { STICKS } from '../config/sticks';
 import { TYRES } from '../config/tyres';
 import type { RacerPhysicsState } from '../sim/physics';
-import { Runner, type RunnerMode } from './character';
+import { Runner, type GroundHeightFn, type RunnerMode } from './character';
 import { buildStick, buildTyre } from './kariling';
 import { puffTexture } from './textures';
+import { clamp } from '../core/math';
 
 export interface RacerVisualState {
   x: number;
@@ -19,6 +20,8 @@ export interface RacerVisualState {
   /** Ground height under the tyre and under the runner. */
   tyreGround: number;
   runnerGround: number;
+  /** World ground height sampler near this racer (feet, stick and scoop placement). */
+  ground?: GroundHeightFn;
 }
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -81,7 +84,13 @@ export class RacerView {
   private scoopLocalPos = new THREE.Vector3();
   private scoopLocalQuat = new THREE.Quaternion();
   private scoopBackLocal = new THREE.Vector3();
+  private scoopLowLocal = new THREE.Vector3();
+  private channelR = 0.08;
+  private scoopBeta = -1;
+  /** Scoop angle below the hub on the rear tread (rad). */
+  static readonly SCOOP_BETA = 0.38;
   readonly radius: number;
+  private readonly tube: number;
   /** Override for end-of-race reactions. */
   forcedMode: RunnerMode | null = null;
   private forcedTime = 0;
@@ -93,6 +102,7 @@ export class RacerView {
   constructor(public loadout: RacerLoadout) {
     const tyre = TYRES[loadout.tyreId];
     this.radius = tyre.radius;
+    this.tube = tyre.tube;
     this.runner = new Runner(loadout.appearance);
     this.group.add(this.runner.root);
     this.spin.add(buildTyre(tyre, loadout.tyreLook));
@@ -106,17 +116,11 @@ export class RacerView {
 
     // Scoop pose relative to the (non-spinning) tyre: on the rear tread, ~25° below the hub,
     // its channel cupping the tread (axis along the tyre's tangent, opening towards the hub).
-    const beta = 0.42;
-    const n = new THREE.Vector3(0, -Math.sin(beta), -Math.cos(beta));
-    const t = new THREE.Vector3(0, n.z, -n.y);
-    const a = new THREE.Vector3(1, 0, 0);
     const tube = tyre.tube;
-    const channelR = tube * 1.18 + 0.008;
-    const scale = channelR / stick.scoopRadius;
+    this.channelR = tube * 1.18 + 0.008;
+    const scale = this.channelR / stick.scoopRadius;
     this.scoop.scale.set(scale, 1, scale);
-    this.scoopLocalPos.copy(n).multiplyScalar(tyre.radius - tube * 1.05);
-    this.scoopLocalQuat.setFromRotationMatrix(new THREE.Matrix4().makeBasis(a, t, n));
-    this.scoopBackLocal.copy(n).multiplyScalar(tyre.radius - tube * 1.05 + channelR + 0.02);
+    this.setScoopAngle(RacerView.SCOOP_BETA);
 
     const blob = new THREE.PlaneGeometry(1, 1);
     blob.rotateX(-Math.PI / 2);
@@ -151,6 +155,25 @@ export class RacerView {
     this.bubble.visible = false;
     this.bubble.renderOrder = 10;
     this.group.add(this.bubble);
+  }
+
+  /**
+   * Scoop pose relative to the (non-spinning) tyre: on the rear tread, `beta` below the hub,
+   * its channel cupping the tread (axis along the tyre's tangent, opening towards the hub).
+   */
+  private setScoopAngle(beta: number): void {
+    if (Math.abs(beta - this.scoopBeta) < 1e-4) return;
+    this.scoopBeta = beta;
+    const tube = TYRES[this.loadout.tyreId].tube;
+    const n = new THREE.Vector3(0, -Math.sin(beta), -Math.cos(beta));
+    const t = new THREE.Vector3(0, n.z, -n.y);
+    const a = new THREE.Vector3(1, 0, 0);
+    const rc = this.radius - tube * 1.05;
+    this.scoopLocalPos.copy(n).multiplyScalar(rc);
+    this.scoopLocalQuat.setFromRotationMatrix(new THREE.Matrix4().makeBasis(a, t, n));
+    this.scoopBackLocal.copy(n).multiplyScalar(rc + this.channelR + 0.02);
+    // Lowest point of the scoop shell: its lower end, on the outside of the channel.
+    this.scoopLowLocal.copy(n).multiplyScalar(rc + this.channelR).addScaledVector(t, 0.085);
   }
 
   setForcedMode(mode: RunnerMode | null): void {
@@ -189,7 +212,9 @@ export class RacerView {
     const lean = p.lean + (p.control === 'lost' ? 0 : wob);
     const leanAbs = Math.min(Math.abs(lean), 1.45);
     const sideShift = Math.sin(leanAbs) * r * Math.sign(lean);
-    this.tyreRoot.position.set(v.x + rxv * sideShift, p.y + Math.cos(leanAbs) * r + 0.005, v.z + rzv * sideShift);
+    // A leaning tyre rests on its shoulder, not its centreline: lift by the section half-width.
+    const shoulderLift = Math.sin(leanAbs) * this.tube * 0.85;
+    this.tyreRoot.position.set(v.x + rxv * sideShift, p.y + Math.cos(leanAbs) * r + shoulderLift + 0.004, v.z + rzv * sideShift);
     this.tyreRoot.rotation.order = 'YZX';
     this.tyreRoot.rotation.set(0, h + p.wobble * 0.07 * Math.sin(p.wobblePhase * 1.3), lean);
     this.spin.rotation.x = p.roll;
@@ -204,6 +229,7 @@ export class RacerView {
     this.modeTime += dt;
     this.runner.root.position.set(v.rx, v.runnerGround, v.rz);
     this.runner.root.rotation.y = v.rHeading;
+    this.runner.ground = v.ground ?? null;
     this.runnerShadow.position.set(v.rx, v.runnerGround + 0.035, v.rz);
     if (this.forcedMode) this.forcedTime += dt;
     this.runner.animate(dt, {
@@ -220,32 +246,63 @@ export class RacerView {
     const attached = !this.forcedMode && p.control !== 'lost' && !p.separated && p.grounded && p.stickContact > 0.3
       && p.stun <= 0 && p.cleaning <= 0 && mode !== 'eww';
     const L = this.stickLength;
+    const gnd = v.ground;
     if (attached) {
-      // Scoop sits on the tread; the arm reaches the stick end that points back at the shoulder.
+      // Scoop sits on the rear tread. If the ground behind the tyre is higher (a hump, a ramp
+      // lip, a lean towards that side) roll the scoop up the tread until it clears the surface.
       this.tyreRoot.updateMatrixWorld(true);
       this.tyreRoot.getWorldQuaternion(this.tmpQ);
+      let beta = RacerView.SCOOP_BETA;
+      this.setScoopAngle(beta);
+      if (gnd) {
+        for (let it = 0; it < 3; it++) {
+          const low = this.tyreRoot.localToWorld(this.tmpB.copy(this.scoopLowLocal));
+          const pen = gnd(low.x, low.z) + 0.012 - low.y;
+          if (pen <= 0) break;
+          beta = Math.max(-0.35, beta - pen / Math.max(0.15, this.radius) - 0.02);
+          this.setScoopAngle(beta);
+        }
+      }
       this.scoop.quaternion.copy(this.tmpQ).multiply(this.scoopLocalQuat);
       this.scoop.position.copy(this.scoopLocalPos);
       this.tyreRoot.localToWorld(this.scoop.position);
       const back = this.tyreRoot.localToWorld(this.tmpB.copy(this.scoopBackLocal));
-      const shoulder = this.runner.root.localToWorld(this.tmpA.set(-0.15 * this.runner.scale, this.runner.height * 0.72, 0.05));
-      const toShoulder = shoulder.sub(back).normalize();
-      const gripTarget = back.clone().addScaledVector(toShoulder, L);
+      // The stick is rigid: the grip lies one stick length from the scoop, on the line towards
+      // the runner's real shoulder; the arm IK then reaches for it (elbow bending naturally).
+      const shoulder = this.runner.rightShoulderWorld(this.tmpA);
+      const toShoulder = shoulder.sub(back);
+      const dist = toShoulder.length();
+      toShoulder.normalize();
+      // A little push-pull with the stride, so the hand visibly works the stick.
+      const pump = Math.sin(p.pushPhase * Math.PI * 2) * 0.025 * p.pushing;
+      const gripTarget = back.clone().addScaledVector(toShoulder, Math.min(L, dist - 0.06) + pump);
       this.runner.aimRightHand(gripTarget);
       const grip = this.runner.rightGrip.getWorldPosition(this.tmpA);
       const dir = back.clone().sub(grip);
       const len = dir.length();
       this.shaft.position.copy(grip);
       this.shaft.quaternion.setFromUnitVectors(UP, dir.normalize());
-      this.shaft.scale.set(1, Math.min(1.08, len / L), 1);
+      this.shaft.scale.set(1, Math.min(1.12, len / L), 1);
     } else {
-      // Held loosely: the stick points forward-down from the hand, scoop on the end.
+      // Held loosely: the stick points forward-down from the hand, scoop on the end — but never
+      // through the ground.
       const grip = this.runner.rightGrip.getWorldPosition(this.tmpA);
       const rh = v.rHeading;
       const raised = mode === 'celebrate' || mode === 'cheer' || mode === 'shock';
       const dir = raised
         ? this.tmpB.set(0.15, 1, 0.1).normalize()
         : this.tmpB.set(Math.sin(rh) * 0.75, mode === 'clean' || mode === 'recover' ? -0.75 : -0.5, Math.cos(rh) * 0.75).normalize();
+      if (!raised) {
+        const ex = grip.x + dir.x * L, ez = grip.z + dir.z * L;
+        const floor = (gnd ? gnd(ex, ez) : v.runnerGround) + 0.07;
+        const minDy = (floor - grip.y) / L;
+        if (dir.y < minDy) {
+          const dy = clamp(minDy, -1, 1);
+          const hz = Math.sqrt(1 - dy * dy);
+          const hl = Math.hypot(dir.x, dir.z) || 1;
+          dir.set((dir.x / hl) * hz, dy, (dir.z / hl) * hz);
+        }
+      }
       this.shaft.position.copy(grip);
       this.shaft.quaternion.setFromUnitVectors(UP, dir);
       this.shaft.scale.set(1, 1, 1);
