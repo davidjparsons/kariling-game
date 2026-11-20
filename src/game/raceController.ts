@@ -1,19 +1,20 @@
 import { BOT_ROSTER, type RacerLoadout } from '../config/appearance';
 import { FIXED_DT, RACE } from '../config/gameplay';
 import { SURFACES } from '../config/surfaces';
-import { ITEMS } from '../config/items';
+import { ITEMS, PROJECTILES, type ProjectileId } from '../config/items';
 import { AI_PROFILES, BotController, type Difficulty } from '../sim/ai';
 import {
   EV_BOOST, EV_BUMP, EV_CANAL, EV_CATCH, EV_CLEAN_START, EV_CLEANED, EV_FALL, EV_LAND, EV_LAUNCH, EV_POO,
-  EV_AIRED, EV_DASH, EV_ITEM_GET, EV_ITEM_USE, EV_NICE_CATCH, EV_PED, EV_RECOVERED, EV_RESPAWN, EV_SHIELD_BLOCK, EV_SEPARATE, EV_STUN, EV_TAP, EV_UNSTABLE, type RacerInput,
+  EV_AIRED, EV_DASH, EV_ITEM_GET, EV_ITEM_USE, EV_NICE_CATCH, EV_PED, EV_RECOVERED, EV_RESPAWN, EV_SEPARATE, EV_STUN, EV_TAP, EV_UNSTABLE, type RacerInput,
 } from '../sim/physics';
 import { populateGrid, RaceSession, type RaceRacer, type RacerSetup } from '../sim/race';
+import { projectileThreatTime } from '../sim/projectiles';
 import type { Track } from '../sim/track';
 import type { AudioEngine } from '../audio/audio';
 import type { InputManager } from '../input/input';
 import type { ChaseCamera } from '../render/camera';
 import { DogView } from '../render/dogView';
-import { buildParol, parolMaterial } from '../render/items';
+import { buildParol, buildProjectileModel, parolMaterial } from '../render/items';
 import { PedestrianViews } from '../render/pedestrianView';
 import * as THREE from 'three';
 import type { DustSystem } from '../render/effects';
@@ -68,6 +69,8 @@ export class RaceController {
   private pedViews: PedestrianViews;
   /** Floating parol pickups, one per sim pickup. */
   private pickupViews: { group: THREE.Mesh; wasActive: boolean; spawnT: number }[] = [];
+  private projectileModels = new Map<ProjectileId, THREE.Group>();
+  private projectileViews = new Map<number, THREE.Group>();
   readonly hud: Hud;
   private prev: Snapshot[] = [];
   private acc = 0;
@@ -230,6 +233,23 @@ export class RaceController {
     const s = this.session;
     const p = this.player;
     const a = this.deps.audio;
+    if (p.phys.itemHitProtection <= 0 && p.phys.invuln <= 0 && p.phys.control !== 'lost' &&
+        s.projectiles.some((shot) => shot.kind === 'buko' && shot.owner !== p.order && projectileThreatTime(shot, p.phys, 0.95) !== null)) {
+      this.hud.toast('buko-incoming', '🥥', 'Incoming Buko!', 0.35, 'warn');
+    }
+    for (const { projectile, target } of s.projectileHits) {
+      const color = PROJECTILES[projectile.kind].color;
+      this.sparkle(target, color, 16);
+      this.views[target.order].react(projectile.kind === 'saging' ? 'Dulas!' : 'Bonk!', null, 0.85, '#fff59d');
+      const hitPlayer = target === p;
+      if (hitPlayer || Math.hypot(target.phys.x - p.phys.x, target.phys.z - p.phys.z) < 18) a.itemHit();
+      if (hitPlayer) {
+        this.hud.toast('item-hit', ITEMS[projectile.kind].icon, `Hit by ${ITEMS[projectile.kind].name}!`, 1.4, 'bad');
+        this.shake = Math.max(this.shake, 0.16);
+      } else if (s.racers[projectile.owner] === p) {
+        this.hud.toast('item-hit', '💥', `Hit ${target.setup.name}!`, 1.2, 'good');
+      }
+    }
     s.racers.forEach((r, i) => {
       const me = r.setup.id === this.playerId;
       const near = me || Math.hypot(r.phys.x - p.phys.x, r.phys.z - p.phys.z) < 18;
@@ -295,11 +315,6 @@ export class RaceController {
         if (near) a.itemUse(it.id);
         view.showItem(it.id);
         if (me) this.hud.toast('item', it.icon, `${it.effect}!`, 1.6, 'good');
-      }
-      if (e & EV_SHIELD_BLOCK) {
-        if (near) a.shieldBlock();
-        this.sparkle(r, 0xc5e1a5, 12);
-        if (me) this.hud.toast('shield', '🥥', 'Shield blocked it!', 1.2, 'good');
       }
       if (e & EV_PED) {
         if (near) a.oops();
@@ -437,12 +452,7 @@ export class RaceController {
             (Math.random() - 0.5) * 0.8, up, (Math.random() - 0.5) * 0.8, color, life);
         }
       };
-      if (fx.item.chippy > 0) trail(30, Math.random() < 0.5 ? 0xffb300 : 0xffe082, 0.8, 0.5);
-      if (fx.item.cola > 0) trail(34, Math.random() < 0.6 ? 0x5d2e12 : 0xfff3e0, 1.6, 0.55);
-      if (fx.crash > 0) trail(4, 0x8d6e63, 0.2, 0.8);
-      if (fx.item.skyflakes > 0) trail(14, 0x81d4fa, 1.0, 0.6);
-      if (fx.item.pandesal > 0) trail(10, 0xffcc80, 0.8, 0.7);
-      if (fx.item.turon > 0) trail(26, 0xffd54f, 0.6, 0.6);
+      if (fx.turbo > 0) trail(30, 0xffd54f, 0.6, 0.6);
       if (fx.dash > 0) trail(40, 0xffffff, 0.3, 0.35);
       if (fx.bonus > 0) trail(30, 0xfff176, 1.0, 0.5);
       // Cartoon stink trail while racing on with a dirty tyre.
@@ -458,6 +468,7 @@ export class RaceController {
 
     s.dogs.forEach((d, i) => this.dogViews[i].update(dt, d, Math.max(0, this.groundAt(d.x, d.z, -1, false))));
     this.updatePickups(dt);
+    this.updateProjectiles();
     this.pedViews.update(dt, s.pedestrians, s.racers.map((r) => r.phys));
 
     const p = this.player;
@@ -483,6 +494,30 @@ export class RaceController {
     }
     this.deps.stage.followSun(px, pz);
     this.hud.updateTags(tagPos, this.deps.camera.camera);
+  }
+
+  private updateProjectiles(): void {
+    const shots = this.session.projectiles;
+    for (const [id, view] of this.projectileViews) {
+      if (shots.some((shot) => shot.id === id)) continue;
+      this.deps.stage.scene.remove(view);
+      this.projectileViews.delete(id);
+    }
+    for (const shot of shots) {
+      let view = this.projectileViews.get(shot.id);
+      if (!view) {
+        let model = this.projectileModels.get(shot.kind);
+        if (!model) {
+          model = buildProjectileModel(shot.kind);
+          this.projectileModels.set(shot.kind, model);
+        }
+        view = model.clone();
+        this.projectileViews.set(shot.id, view);
+        this.deps.stage.scene.add(view);
+      }
+      view.position.set(shot.x, shot.y, shot.z);
+      view.rotation.set(shot.kind === 'buko' ? shot.roll : 0, shot.heading, shot.kind === 'skyflakes' ? shot.roll * 0.16 : 0, 'YXZ');
+    }
   }
 
   /** Spin/bob the parol pickups; burst when collected, grow back in when they respawn. */
@@ -562,13 +597,24 @@ export class RaceController {
       return;
     }
     this.hud.setItemRolling(false);
-    const key = ph.item ?? '';
+    const ready = ph.itemCooldown <= 0 && ph.control !== 'lost';
+    const key = ph.item ? `${ph.item}/${ready}` : '';
     if (key === this.itemShown) return;
     this.itemShown = key;
-    this.hud.setItem(ph.item ? ITEMS[ph.item].icon : null, ph.item ? ITEMS[ph.item].name : '');
+    this.hud.setItem(ph.item ? ITEMS[ph.item].icon : null, ph.item ? ITEMS[ph.item].name : '', !!ph.item && ready, ph.item === 'buko');
   }
 
   dispose(): void {
+    for (const view of this.projectileViews.values()) this.deps.stage.scene.remove(view);
+    const resources = new Set<THREE.BufferGeometry | THREE.Material>();
+    for (const model of this.projectileModels.values()) {
+      model.traverse((node) => {
+        if (!(node instanceof THREE.Mesh)) return;
+        resources.add(node.geometry);
+        for (const material of [node.material].flat()) resources.add(material);
+      });
+    }
+    for (const resource of resources) resource.dispose();
     this.deps.stage.scene.remove(this.pedViews.group);
     this.pedViews.dispose();
     // Parol geometry/material are shared module-level caches (reused by the next race).

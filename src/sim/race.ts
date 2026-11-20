@@ -13,12 +13,13 @@ import { createPedestrians, updatePedestrians, type PedEvent, type Pedestrian, t
 import { PEDESTRIAN } from '../config/pedestrians';
 import { Rng } from '../core/rng';
 import {
-  addImpact, applyBoost, applyDirt, applyStun, createRacerState, EV_BOOST, EV_BUMP, EV_HAZARD, EV_ITEM_GET, EV_LAUNCH, EV_PED, EV_POO, giveItem,
+  addImpact, applyBoost, applyDirt, applyStun, createRacerState, EV_BOOST, EV_BUMP, EV_HAZARD, EV_ITEM_GET, EV_ITEM_USE, EV_LAUNCH, EV_PED, EV_POO, giveItem,
   EV_RESPAWN, EV_STUN, NO_INPUT, resetControl, runnerConfig, stepRacer,
   type Ground, type GroundFn, type PhysicsContext, type RacerInput, type RacerPhysicsState,
 } from './physics';
 import { advanceProgress, compareRacers, createProgress, rankingDistance, type LapProgress } from './progress';
 import type { Track, TrackProjection } from './track';
+import { advanceProjectile, launchProjectile, type ItemProjectile, type ProjectileHit } from './projectiles';
 
 export const MAX_RACERS = 4;
 
@@ -87,6 +88,9 @@ export class RaceSession {
   readonly field: HazardField;
   readonly dogs: Dog[];
   readonly pickups: Pickup[];
+  projectiles: ItemProjectile[] = [];
+  readonly projectileHits: ProjectileHit[] = [];
+  private nextProjectileId = 0;
   readonly pedestrians: Pedestrian[];
   /** Pedestrian events from the most recent tick. */
   pedEvents: PedEvent[] = [];
@@ -192,6 +196,7 @@ export class RaceSession {
     this.tick++;
     for (const r of this.racers) { r.events = 0; r.bumpImpact = 0; r.hazardHits.length = 0; }
     this.dogEvents = [];
+    this.projectileHits.length = 0;
     this.pedEvents = [];
 
     if (this.phase === 'countdown') {
@@ -210,6 +215,10 @@ export class RaceSession {
       if (r.bot) input = r.bot.update(r, this.racers, this, dt);
       else input = inputs[r.setup.id] ?? NO_INPUT;
       r.events |= stepRacer(r.phys, input, r.ctx, this.groundFor(r), dt);
+      const used = r.phys.lastItem;
+      if ((r.events & EV_ITEM_USE) && used && used !== 'turon') {
+        this.projectiles.push(launchProjectile(this.nextProjectileId++, used, r, input.useItem === 'backward'));
+      }
       this.stuckCheck(r, input, dt);
     }
 
@@ -237,6 +246,7 @@ export class RaceSession {
       r.wrongWayTime = dot < -0.3 && r.phys.speed > 1 && r.phys.control !== 'lost' ? r.wrongWayTime + dt : 0;
     }
 
+    if (this.projectiles.length) this.projectiles = this.projectiles.filter((shot) => advanceProjectile(shot, this, dt));
     this.updateDogs(dt);
     this.updatePedestrians(dt);
     tickPickups(this.pickups, dt);

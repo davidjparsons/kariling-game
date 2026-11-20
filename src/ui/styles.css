@@ -338,7 +338,13 @@ html, body {
 .hud-item.empty kbd { display: none; }
 .hud-item.empty::after { content: ''; width: 26px; height: 26px; border-radius: 50%; border: 3px dashed rgba(255,255,255,.7); position: absolute; }
 .hud-item.rolling span { animation: roll 0.12s linear infinite; }
-.hud-item:not(.empty):not(.rolling) { animation: ready 0.9s ease-in-out infinite alternate; }
+.touch-right .item-back {
+  grid-column: 1; grid-row: 1; width: min(70px, 14vh, 12vw); height: min(60px, 13vh, 12vw);
+  font-size: clamp(9px, 1.6vw, 12px); border-radius: 16px; background: var(--leaf);
+}
+.hud-item:disabled:not(.empty):not(.rolling), .item-back:disabled { opacity: 0.56; }
+.hud-item small { max-width: 95px; overflow: hidden; text-overflow: ellipsis; }
+.hud-item:not(:disabled) { animation: ready 0.9s ease-in-out infinite alternate; }
 .hud-item:active { transform: translateY(3px); box-shadow: 0 1px 0 var(--bark); }
 @keyframes roll { 50% { transform: translateY(-4px) scale(0.85); opacity: 0.6; } }
 @keyframes ready { to { box-shadow: 0 4px 0 var(--bark), 0 0 0 4px rgba(255, 207, 63, 0.7); } }

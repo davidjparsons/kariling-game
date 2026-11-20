@@ -1,12 +1,9 @@
-import { DASH, EFFECT_LIMITS, ITEM_IDS, ITEMS, LANDING_BONUS, NEUTRAL_MODS, type EffectMods, type ItemId } from '../config/items';
+import { DASH, EFFECT_LIMITS, ITEM_IDS, ITEMS, LANDING_BONUS, NEUTRAL_MODS, TURON_TURBO, type EffectMods, type ItemId } from '../config/items';
 import type { Rng } from '../core/rng';
 
 /** Active timed effects on a racer (seconds left; 0 = inactive). */
 export interface ActiveEffects {
-  item: Record<ItemId, number>;
-  /** Sugar-rush crash phase. */
-  crash: number;
-  shieldHits: number;
+  turbo: number;
   dash: number;
   dashCooldown: number;
   /** Ramp landing bonus. */
@@ -14,23 +11,11 @@ export interface ActiveEffects {
 }
 
 export function createEffects(): ActiveEffects {
-  const item = {} as Record<ItemId, number>;
-  for (const id of ITEM_IDS) item[id] = 0;
-  return { item, crash: 0, shieldHits: 0, dash: 0, dashCooldown: 0, bonus: 0 };
+  return { turbo: 0, dash: 0, dashCooldown: 0, bonus: 0 };
 }
 
 export function tickEffects(fx: ActiveEffects, dt: number): void {
-  for (const id of ITEM_IDS) {
-    const before = fx.item[id];
-    if (before <= 0) continue;
-    fx.item[id] = Math.max(0, before - dt);
-    if (fx.item[id] === 0) {
-      const cfg = ITEMS[id];
-      if (cfg.crash && cfg.crashDuration) fx.crash = cfg.crashDuration;
-      if (cfg.shieldHits) fx.shieldHits = 0;
-    }
-  }
-  fx.crash = Math.max(0, fx.crash - dt);
+  fx.turbo = Math.max(0, fx.turbo - dt);
   fx.dash = Math.max(0, fx.dash - dt);
   fx.dashCooldown = Math.max(0, fx.dashCooldown - dt);
   fx.bonus = Math.max(0, fx.bonus - dt);
@@ -43,8 +28,7 @@ function mul(out: EffectMods, m: Partial<EffectMods>): void {
 /** Combined handling modifiers from every active effect, clamped so buffs can't run away. */
 export function effectMods(fx: ActiveEffects, out: EffectMods = { ...NEUTRAL_MODS }): EffectMods {
   Object.assign(out, NEUTRAL_MODS);
-  for (const id of ITEM_IDS) if (fx.item[id] > 0) mul(out, ITEMS[id].mods);
-  if (fx.crash > 0 && ITEMS.cola.crash) mul(out, ITEMS.cola.crash);
+  if (fx.turbo > 0) mul(out, TURON_TURBO.mods);
   if (fx.dash > 0) mul(out, DASH.mods);
   if (fx.bonus > 0) mul(out, LANDING_BONUS.mods);
   out.accel = Math.min(out.accel, EFFECT_LIMITS.accelMax);
@@ -54,23 +38,9 @@ export function effectMods(fx: ActiveEffects, out: EffectMods = { ...NEUTRAL_MOD
   return out;
 }
 
-/** Start an item's effect. Re-using an item refreshes its timer (no stacking). Returns stamina gained. */
-export function activateItem(fx: ActiveEffects, id: ItemId): number {
-  const cfg = ITEMS[id];
-  fx.item[id] = cfg.duration;
-  if (cfg.shieldHits) fx.shieldHits = cfg.shieldHits;
-  if (id === 'cola') fx.crash = 0;
-  return cfg.stamina ?? 0;
-}
-
-/** True if any item effect is running (for visuals). */
-export function anyItemActive(fx: ActiveEffects): boolean {
-  return ITEM_IDS.some((id) => fx.item[id] > 0);
-}
-
 /**
- * Weighted random item. `rankFrac` is 0 for the leader … 1 for last place: stronger catch-up
- * items (Turon, Sugar Rush) become likelier further back.
+ * Weighted random item. `rankFrac` is 0 for the leader … 1 for last place: Turon and Buko
+ * become likelier further back.
  */
 export function rollItem(rng: Rng, rankFrac: number): ItemId {
   const t = Math.min(1, Math.max(0, rankFrac));
