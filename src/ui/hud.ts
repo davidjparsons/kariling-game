@@ -40,7 +40,7 @@ export class Hud {
   constructor(parent: HTMLElement, track: Track, names: string[], showTouch: boolean) {
     this.root = document.createElement('div');
     this.root.className = 'hud';
-    const itemButton = `<button class="hud-item empty" data-touch="item" data-k="item" aria-label="No item"><span data-k="itemIcon"></span><small data-k="itemName"></small>${showTouch ? '' : '<kbd>E</kbd>'}</button>`;
+    const itemButton = `<button class="hud-item empty" data-touch="item" data-k="item" aria-label="No item" disabled><span data-k="itemIcon"></span><small data-k="itemName"></small>${showTouch ? '' : '<kbd>E</kbd>'}</button>`;
     this.root.innerHTML = `
       <div class="hud-tl">
         <div class="hud-pos"><span data-k="pos">1</span><sup data-k="suf">st</sup><small>/<span data-k="of">4</span></small></div>
@@ -71,13 +71,13 @@ export class Hud {
           <div class="steer-pad" data-touch="steer"><span class="arrow l">◀</span><span class="arrow r">▶</span></div>
         </div>
         <div class="touch-right">
-          ${showTouch ? itemButton : ''}
+          ${showTouch ? `${itemButton}<button class="tbtn item-back hidden" data-touch="item-back" data-k="itemBack" aria-label="Roll Buko backward" disabled><span>▼ BACK</span></button>` : ''}
           <button class="tbtn balance" data-touch="balance"><span>BALANCE</span></button>
           <button class="tbtn brake" data-touch="brake"><span>BRAKE</span></button>
           <button class="tbtn push" data-touch="push"><span>PUSH</span></button>
         </div>
       </div>
-      <div class="hud-keys ${showTouch ? 'hidden' : ''}">W/↑ push (tap twice: dash) · A D/← → steer · S/↓ brake · Space balance · E item · C camera · Esc pause</div>
+      <div class="hud-keys ${showTouch ? 'hidden' : ''}">W/↑ push (tap twice: dash) · A D/← → steer · S/↓ brake · Space balance · E item · Q roll Buko back · C camera · Esc pause</div>
     `;
     parent.appendChild(this.root);
     this.root.querySelectorAll<HTMLElement>('[data-k]').forEach((e) => { this.el[e.dataset.k!] = e; });
@@ -211,10 +211,16 @@ export class Hud {
   }
 
   /** Item slot contents (null = empty). */
-  setItem(icon: string | null, name: string): void {
+  setItem(icon: string | null, name: string, ready = false, canRollBack = false): void {
     const slot = this.el.item;
     if (!slot) return;
     slot.classList.toggle('empty', !icon);
+    (slot as HTMLButtonElement).disabled = !ready;
+    const back = this.el.itemBack as HTMLButtonElement | undefined;
+    if (back) {
+      back.classList.toggle('hidden', !canRollBack);
+      back.disabled = !ready;
+    }
     this.el.itemIcon.textContent = icon ?? '';
     slot.setAttribute('aria-label', icon ? `Use ${name}` : 'No item');
     this.el.itemName.textContent = icon ? name : '';

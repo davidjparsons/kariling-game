@@ -60,6 +60,11 @@ describe('character ground contact', () => {
         expect(maxLowest).toBeLessThan(0.05);
       });
     }
+    it(`${name} keeps a foot on the surface during a sprint over humps`, () => {
+      const { minClear, maxLowest } = simulate(look, 'run', 11, humps);
+      expect(minClear).toBeGreaterThan(-0.012);
+      expect(maxLowest).toBeLessThan(0.05);
+    });
     for (const mode of ['idle', 'recover', 'clean', 'stunned', 'shock', 'sad', 'fall'] as RunnerMode[]) {
       it(`${name} ${mode} pose rests on the ground`, () => {
         const { minClear, maxLowest } = simulate(look, mode, 0, flat, 1.5);

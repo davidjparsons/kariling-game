@@ -1,6 +1,6 @@
 # KARILING — Development Handover
 
-_Written 2026-11-21 at commit `d11544a`; updated in session 3 (Milestone 1.6), branch `main`._
+_Updated 2026-11-21 for Milestone 1.6 and the revised first power-up lineup._
 _Read this first in a new session, then `docs/GAME_SPEC.md` (requirements, source of truth) and `PROGRESS.md` (status log)._
 
 ---
@@ -15,8 +15,8 @@ _Read this first in a new session, then `docs/GAME_SPEC.md` (requirements, sourc
 | Phase 2 — customisation UI, 3 more tracks | **Not started** |
 | Phase 3 — Cloudflare backend / D1 / leaderboards | **Not started** (nothing provisioned) |
 | Phase 4 — multiplayer (Durable Objects) | **Not started** |
-| Git | `main`. Pushed to `github.com/davidjparsons/kariling-game` (public, by the owner's choice) up to `d11544a`. **The handover commit and all Milestone 1.6 commits are not pushed.** |
-| Checks (2026-11-21, session 3) | `pnpm typecheck` ✔ · `pnpm lint` ✔ · `pnpm test` ✔ 124/124 · `pnpm build` ✔ |
+| Git | `main`. Pushed to `github.com/davidjparsons/kariling-game` (public, by the owner's choice) through `a8473f1`. |
+| Checks (2026-11-21, revised power-ups) | `pnpm typecheck` ✔ · `pnpm lint` ✔ · `pnpm test` ✔ 131/131 · `pnpm build` ✔ |
 | Hand-played by a human | **No.** Tuning comes from headless simulations, a dev autopilot driving the player in the browser, and targeted scripted inputs. |
 | Real phones / iPads | **Not tested.** Only Chromium viewport emulation (740×360 landscape) and synthetic touch events. |
 | Audio | Implemented (WebAudio synthesis) but **never listened to** — the test tooling cannot hear audio. |
@@ -196,7 +196,7 @@ Entry effects fire once when a grounded (or low, y ≤ 0.12) tyre enters a footp
 
 **Dirt / cleaning:** poo sets `dirt = 1` → −16 % top speed, −25 % grip, +30 % instability gain, stink lines, "EWW!". Slowing below 2.2 m/s without pushing starts a 1 s clean ("Linis!"), or rolling on grass rubs it off at 0.35/s.
 
-**Boosts:** 1.5 s, top speed ×1.2, accel ×1.8 (and a small drive even unpushed), instability ×1.35, AI plans corners with 80 % of its normal threshold while boosted. These boost pads are the only "power-up" so far — no item system exists.
+**Boosts:** 1.5 s, top speed ×1.2, accel ×1.8 (and a small drive even unpushed), instability ×1.35, AI plans corners with 80 % of its normal threshold while boosted. Track boost pads are independent of held items.
 
 ---
 
@@ -228,9 +228,19 @@ Profiles: Easy (cornerSafety 0.72, pushCap 0.72, mistakes 0.035/s, awareness 0.6
 
 ## 10. Controls, HUD, settings
 
+Parols grant **Buko Missile, Saging Peel, SkyFlakes Cracker Shot or Turon Turbo**. Buko throws
+forward or rolls back and interacts with track height, surface resistance and fences. Saging is
+a peel dropped behind, SkyFlakes fires a quick forward shot, and Turon is a short speed boost.
+Humans and bots use the same item cooldowns and tyre-hit rules. A hit gives 1.8 seconds of
+item-hit protection. See the configuration in `src/config/items.ts` and the shared projectile
+simulation in `src/sim/projectiles.ts`.
+
 | Action | Keyboard | Touch |
 |---|---|---|
 | Push | W / ↑ | PUSH (hold) |
+| Dash | Double-tap W / ↑ | Double-tap PUSH |
+| Use power-up / throw Buko forward | E | Item button |
+| Roll Buko backward | Q | BACK when Buko is held |
 | Steer | A D / ← → | steering pad (analogue by finger offset) |
 | Brake | S / ↓ | BRAKE |
 | Balance | Space / Left Shift | BALANCE |
@@ -246,7 +256,7 @@ Quality profiles (`render/quality.ts`): Low (pixel ratio 1, no shadows, grass 90
 
 ## 11. Known bugs, quirks and limitations
 
-**Milestone 1.6 notes** — see `PROGRESS.md` "Milestone 1.6 known issues" (draw calls up, foot slip at sprint, villager simplifications, scripted court, approximate scoop clearance, generic snack names).
+**Milestone 1.6 notes** — see `PROGRESS.md` "Milestone 1.6 known issues" (draw calls, sprint gait and scoop clearance to playtest, villager simplifications, scripted court).
 
 **Bugs / unexplained**
 1. **Stray dark specks on the start line in the menu background** (seen once in the main-menu orbit, small dark blobs above the checker). Investigation ruled out tread blocks, instanced rocks and raycastable meshes; root cause **not found**. May be particles at the origin (start line is at world 0,0) — check `DustSystem` alpha handling first.
@@ -273,7 +283,7 @@ Quality profiles (`render/quality.ts`): Low (pixel ratio 1, no shadows, grass 90
 
 ## 12. Testing summary
 
-`pnpm test` — **124 tests in 11 files** after Milestone 1.6 (new: character, dogs, terrain, items, pedestrians — see `PROGRESS.md`). The table below is the Milestone 1.5 baseline:
+`pnpm test` — **131 tests in 11 files** after Milestone 1.6 (new: character, dogs, terrain, items, pedestrians — see `PROGRESS.md`). The table below is the Milestone 1.5 baseline:
 
 | File | Tests | Covers |
 |---|---|---|

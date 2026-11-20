@@ -1,15 +1,5 @@
-/**
- * Filipino snack & drink power-ups, double-tap dash and the ramp "Nice Catch!" bonus.
- * Everything here is data: tune durations, strengths and odds without touching the simulation.
- * Display names are generic ("Corn Chips", "Crackers", "Cola") so no brand names or packaging
- * are reproduced; the ids keep the original brief's names for reference.
- *
- * Effect modifiers multiply the racer's normal handling while the effect is active. Several
- * effects can overlap (e.g. a dash during Golden Roll), but the combined result is clamped by
- * `EFFECT_LIMITS`, and re-using the same item only refreshes its timer — buffs never stack up.
- */
-
-export type ItemId = 'buko' | 'chippy' | 'skyflakes' | 'pandesal' | 'turon' | 'cola';
+/** Item pool, projectile tuning, double-tap dash and the ramp landing bonus. */
+export type ItemId = 'buko' | 'saging' | 'skyflakes' | 'turon';
 
 export interface EffectMods {
   /** Push acceleration. */
@@ -30,12 +20,10 @@ export interface EffectMods {
   rolling: number;
   /** Braking strength (lower = harder to slow down). */
   brake: number;
-  /** Runner animation speed. */
-  anim: number;
 }
 
 export const NEUTRAL_MODS: Readonly<EffectMods> = Object.freeze({
-  accel: 1, speed: 1, instability: 1, corner: 1, steer: 1, recovery: 1, staminaDrain: 1, rolling: 1, brake: 1, anim: 1,
+  accel: 1, speed: 1, instability: 1, corner: 1, steer: 1, recovery: 1, staminaDrain: 1, rolling: 1, brake: 1,
 });
 
 /** Caps on the combined modifiers so no combination becomes overwhelming. */
@@ -47,75 +35,66 @@ export const EFFECT_LIMITS = {
   rollingMin: 0.45,
 } as const;
 
-export interface ItemConfig {
+export type ProjectileId = Exclude<ItemId, 'turon'>;
+
+export interface ProjectileConfig {
+  direction: 'both' | 'forward' | 'backward';
+  radius: number;
+  lifetime: number;
+  launchHeight: number;
+  launchUp: number;
+  forwardSpeed: number;
+  backwardSpeed: number;
+  backwardLaunch?: { height: number; up: number };
+  gravity: number;
+  bounce: number;
+  rolling: number;
+  airDrag: number;
+  speedLoss: number;
+  impactBase: number;
+  impactPerSpeed: number;
+  maxImpact: number;
+  color: number;
+}
+
+export const PROJECTILES: Record<ProjectileId, ProjectileConfig> = {
+  buko: {
+    direction: 'both', radius: 0.23, lifetime: 7, launchHeight: 0.48, launchUp: 1.9,
+    forwardSpeed: 10, backwardSpeed: 7, backwardLaunch: { height: 0.27, up: 0.15 }, gravity: 9.81, bounce: 0.52, rolling: 0.85, airDrag: 0.13,
+    speedLoss: 0.035, impactBase: 0.24, impactPerSpeed: 0.053, maxImpact: 1.1, color: 0x9cdb4a,
+  },
+  saging: {
+    direction: 'backward', radius: 0.28, lifetime: 11, launchHeight: 0.18, launchUp: 0,
+    forwardSpeed: 0, backwardSpeed: 0, gravity: 9.81, bounce: 0, rolling: 7, airDrag: 5,
+    speedLoss: 0.026, impactBase: 0.19, impactPerSpeed: 0.037, maxImpact: 0.62, color: 0xffdc44,
+  },
+  skyflakes: {
+    direction: 'forward', radius: 0.15, lifetime: 1.45, launchHeight: 0.53, launchUp: 0.3,
+    forwardSpeed: 15, backwardSpeed: 0, gravity: 4, bounce: 0, rolling: 9, airDrag: 0.3,
+    speedLoss: 0.018, impactBase: 0.12, impactPerSpeed: 0.02, maxImpact: 0.48, color: 0xf4d7a0,
+  },
+};
+
+interface ItemConfig {
   id: ItemId;
-  /** Display name. */
   name: string;
-  /** Effect name shown when used. */
   effect: string;
-  /** HUD icon (emoji; renders on every platform without image assets). */
   icon: string;
-  description: string;
-  /** Effect duration (s). */
-  duration: number;
-  /** Modifiers while active (unspecified = 1). */
-  mods: Partial<EffectMods>;
-  /** Stamina restored instantly on use (0..1). */
-  stamina?: number;
-  /** Absorbs this many moderate hits (collision, hazard, dog). */
-  shieldHits?: number;
-  /** After the effect, a crash phase with these modifiers for `crashDuration` s. */
-  crash?: Partial<EffectMods>;
-  crashDuration?: number;
-  /** Relative pick weight for a racer in the lead / at the back (interpolated by position). */
+  cooldown: number;
   weightLead: number;
   weightBack: number;
 }
 
 export const ITEMS: Record<ItemId, ItemConfig> = {
-  buko: {
-    id: 'buko', name: 'Buko', effect: 'Stability Shield', icon: '🥥',
-    description: 'Young coconut: steadier tyre, less wobble, shrugs off one bump or bite.',
-    duration: 8, shieldHits: 1,
-    mods: { instability: 0.55, recovery: 1.5 },
-    weightLead: 30, weightBack: 16,
-  },
-  chippy: {
-    id: 'chippy', name: 'Corn Chips', effect: 'Crunch Boost', icon: '🌽',
-    description: 'Corn chips: a short crunchy burst of speed. A little twitchy while it lasts.',
-    duration: 1.7,
-    mods: { accel: 1.75, speed: 1.1, instability: 1.25 },
-    weightLead: 26, weightBack: 20,
-  },
-  skyflakes: {
-    id: 'skyflakes', name: 'Crackers', effect: 'Recovery Boost', icon: '🍘',
-    description: 'Plain crackers: stamina back, stronger pushes, wobbles settle fast.',
-    duration: 4, stamina: 0.35,
-    mods: { accel: 1.15, recovery: 2.2 },
-    weightLead: 22, weightBack: 16,
-  },
-  pandesal: {
-    id: 'pandesal', name: 'Pandesal', effect: 'Endurance', icon: '🍞',
-    description: 'Warm bread roll: lots of stamina and you tire much slower for a while.',
-    duration: 7, stamina: 0.6,
-    mods: { staminaDrain: 0.35 },
-    weightLead: 18, weightBack: 14,
-  },
-  turon: {
-    id: 'turon', name: 'Turon', effect: 'Golden Roll', icon: '🍌',
-    description: 'Banana spring roll: faster and keeps rolling — hard to slow for corners!',
-    duration: 4,
-    mods: { accel: 1.3, speed: 1.1, rolling: 0.5, brake: 0.55 },
-    weightLead: 4, weightBack: 18,
-  },
-  cola: {
-    id: 'cola', name: 'Cola sa Plastik', effect: 'Sugar Rush', icon: '🥤',
-    description: 'Cola in a tied plastic bag: big burst, frantic legs, very wobbly in sharp turns — then a sugar crash.',
-    duration: 2.6,
-    mods: { accel: 2.0, speed: 1.16, corner: 1.9, steer: 0.85, anim: 1.35 },
-    crash: { staminaDrain: 2.6, accel: 0.92 }, crashDuration: 3.5,
-    weightLead: 2, weightBack: 16,
-  },
+  buko: { id: 'buko', name: 'Buko Missile', effect: 'Buko away', icon: '🥥', cooldown: 2.4, weightLead: 28, weightBack: 36 },
+  saging: { id: 'saging', name: 'Saging Peel', effect: 'Peel dropped', icon: '🍌', cooldown: 2, weightLead: 36, weightBack: 12 },
+  skyflakes: { id: 'skyflakes', name: 'SkyFlakes Cracker Shot', effect: 'Cracker shot', icon: '🍘', cooldown: 1.6, weightLead: 24, weightBack: 26 },
+  turon: { id: 'turon', name: 'Turon Turbo', effect: 'Turon turbo', icon: '🍌', cooldown: 3, weightLead: 12, weightBack: 26 },
+};
+
+export const TURON_TURBO = {
+  duration: 3.5,
+  mods: { accel: 1.55, speed: 1.12, rolling: 0.75 } as Partial<EffectMods>,
 };
 
 export const ITEM_IDS = Object.keys(ITEMS) as ItemId[];
@@ -123,6 +102,8 @@ export const ITEM_IDS = Object.keys(ITEMS) as ItemId[];
 export const ITEM_RULES = {
   /** Roulette time after collecting before the item can be used (s). */
   revealTime: 1.0,
+  /** Prevent item hits from chaining on the same racer. */
+  hitProtection: 1.8,
   /** Pickup respawn delay (s). */
   respawnTime: 6,
   /** Tyre-to-pickup distance that collects it (m). */

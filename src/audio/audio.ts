@@ -253,12 +253,12 @@ export class AudioEngine {
   /** Item used — each snack has its own sound. */
   itemUse(id: string): void {
     switch (id) {
-      case 'chippy': // crunchy corn chips
-        for (let i = 0; i < 5; i++) this.burst(2800 + Math.random() * 1500, 1.5, 0.22, 0.05, i * 0.07, 'bandpass');
+      case 'skyflakes':
+        this.burst(2900, 2, 0.2, 0.11);
+        this.tone(730, 'triangle', 0.12, 0.11, 0, 400);
         break;
-      case 'cola': // fizz + slurp
-        this.burst(6000, 0.7, 0.18, 0.7, 0, 'highpass');
-        this.tone(300, 'sine', 0.1, 0.35, 0.1, 700);
+      case 'saging':
+        this.tone(285, 'triangle', 0.18, 0.15, 0, 610);
         break;
       case 'buko': // hollow coconut knock
         this.tone(420, 'sine', 0.2, 0.18, 0, 380);
@@ -267,13 +267,9 @@ export class AudioEngine {
       case 'turon': // golden shimmer
         [660, 880, 1100, 1320].forEach((f, i) => this.tone(f, 'sine', 0.07, 0.25, i * 0.04));
         break;
-      default: // munch
-        this.burst(900, 1.2, 0.18, 0.08, 0, 'lowpass');
-        this.burst(900, 1.2, 0.16, 0.08, 0.14, 'lowpass');
-        this.tone(660, 'triangle', 0.08, 0.2, 0.25, 990);
     }
   }
-  shieldBlock(): void {
+  itemHit(): void {
     this.tone(520, 'sine', 0.18, 0.25, 0, 260);
     this.burst(3000, 3, 0.1, 0.1);
   }

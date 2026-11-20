@@ -18,17 +18,19 @@ export class InputManager {
   /** Double-tap on the push control (key or touch button) → one-shot dash. */
   private tap = new DoubleTapDetector();
   private pendingDash = false;
-  private pendingItem = false;
+  private pendingItem: RacerInput['useItem'] = false;
   /** Fired when a dash is triggered (for immediate UI feedback). */
   onDash: (() => void) | null = null;
 
   constructor() {
     const down = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT') return;
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
       if (!e.repeat) {
         if (e.code === 'KeyW' || e.code === 'ArrowUp') this.pushPressed(e.timeStamp);
-        if (e.code === 'KeyE' || e.code === 'KeyQ' || e.code === 'Enter') this.pendingItem = true;
+        if (e.code === 'KeyE' || (e.code === 'Enter' && tag !== 'BUTTON')) this.pendingItem = true;
+        if (e.code === 'KeyQ') this.pendingItem = 'backward';
         if (e.code === 'Escape' || e.code === 'KeyP') this.onPause?.();
         if (e.code === 'KeyC') this.onCamera?.();
         if (e.code === 'F3' || e.code === 'Backquote') { e.preventDefault(); this.onDebug?.(); }
@@ -127,7 +129,16 @@ export class InputManager {
     hold('brake');
     hold('balance');
     root.querySelector('[data-touch="pause"]')?.addEventListener('click', () => this.onPause?.());
-    root.querySelector('[data-touch="item"]')?.addEventListener('pointerdown', (e) => { e.preventDefault(); this.pendingItem = true; });
+    for (const [control, direction] of [['item', true], ['item-back', 'backward']] as const) {
+      const button = root.querySelector<HTMLButtonElement>(`[data-touch="${control}"]`);
+      button?.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        if (!button.disabled) this.pendingItem = direction;
+      });
+      button?.addEventListener('click', (e) => {
+        if (e.detail === 0 && !button.disabled) this.pendingItem = direction;
+      });
+    }
   }
 
   clear(): void {

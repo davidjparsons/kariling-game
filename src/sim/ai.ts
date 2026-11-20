@@ -1,9 +1,11 @@
 import { PHYSICS } from '../config/gameplay';
+import { PROJECTILES } from '../config/items';
 import { SURFACES } from '../config/surfaces';
 import { clamp, damp, wrapAngle } from '../core/math';
 import { Rng } from '../core/rng';
 import { effectiveMaxSpeed, gripLimit, stressThreshold, turnScale, type RacerInput } from './physics';
 import { effectMods } from './effects';
+import { projectileThreatTime } from './projectiles';
 import { lerp } from '../core/math';
 import type { RaceRacer, RaceSession } from './race';
 
@@ -158,6 +160,16 @@ export class BotController {
       blocks.push([Math.min(ped.d, ahead) - 1.1, Math.max(ped.d, ahead) + 1.1]);
       if (dist < 14) limitFromHazards = Math.min(limitFromHazards, 5 + dist * 0.4);
     }
+    // Read nearby threats early enough to steer away from the predicted contact lane.
+    if (p.itemHitProtection <= 0 && p.invuln <= 0) {
+      for (const shot of session.projectiles) {
+        if (shot.owner === self.order) continue;
+        const time = projectileThreatTime(shot, p, 1.35);
+        if (time === null) continue;
+        const lane = track.project(shot.x + shot.vx * time, shot.z + shot.vz * time, shot.hint).d;
+        blocks.push([lane - 1.35, lane + 1.35]);
+      }
+    }
     const canalNear = (side: number) => field.hasCanal(s, side) || field.hasCanal(s + 10, side);
     let best = desired, bestCost = Infinity;
     for (let c = -hw + 0.9; c <= hw - 0.9; c += 0.25) {
@@ -181,7 +193,7 @@ export class BotController {
 
     // --- Speed planning: stay under the speed-dependent stress threshold ---
     const grip = gripLimit(tyre, surf);
-    // Sugar rush / dash make sharp turns riskier: plan corners more cautiously.
+    // Dash make sharp turns riskier: plan corners more cautiously.
     const cornerMod = effectMods(p.fx).corner;
     const vTop = effectiveMaxSpeed(tyre, surf) * (p.boost > 0 ? PHYSICS.boostSpeedMul : 1);
     let allowed = vTop;
@@ -256,18 +268,31 @@ export class BotController {
       for (let x = 0; x <= len; x += 4) if (Math.abs(track.sampleAt(s + x).curvature) > 0.018) return false;
       return true;
     };
-    const chased = session.dogs.some((d) => (d.state === 'chase' || d.state === 'alert') && d.target === me);
-    let useItem = false;
+    let useItem: RacerInput['useItem'] = false;
     if (p.item && p.itemReveal <= 0 && !this.cruising) {
       this.itemHold += dt;
-      if (this.itemHold > this.itemDelay) {
-        const calm = p.control === 'controlled';
-        switch (p.item) {
-          case 'buko': useItem = chased || p.instability > 0.3 || blocks.length > 0 || this.itemHold > 12; break;
-          case 'chippy': useItem = calm && straight(20) && p.speed > 4; break;
-          case 'turon': case 'cola': useItem = calm && straight(prof.lineSkill > 0.6 ? 45 : 30) && p.speed > 4; break;
-          case 'skyflakes': useItem = p.instability > 0.33 || p.stamina < 0.45 || this.itemHold > 15; break;
-          case 'pandesal': useItem = p.stamina < 0.55 || this.itemHold > 15; break;
+      if (p.itemCooldown <= 0 && this.itemHold > this.itemDelay) {
+        if (p.item === 'turon') {
+          useItem = p.control === 'controlled' && p.speed > 3 && straight(20);
+        } else {
+          const cfg = PROJECTILES[p.item];
+          const fx = Math.sin(p.heading), fz = Math.cos(p.heading);
+          let nearest = Infinity;
+          for (const other of all) {
+            const op = other.phys;
+            if (other === self || other.progress.finished || op.control === 'lost' || op.itemHitProtection > 0 || op.invuln > 0) continue;
+            const dx = op.x - p.x, dz = op.z - p.z;
+            const front = dx * fx + dz * fz;
+            const distance = Math.abs(front);
+            const back = front < 0;
+            if (distance < 2 || distance > (back ? 14 : 19) || distance >= nearest ||
+                (back && cfg.direction === 'forward') || (!back && cfg.direction === 'backward')) continue;
+            if (Math.abs(dx * fz - dz * fx) > (p.item === 'saging' ? 1.05 : 0.8)) continue;
+            nearest = distance;
+            useItem = back && p.item === 'buko' ? 'backward' : true;
+          }
+          // A held peel can also be left on the racing line for a later arrival.
+          if (p.item === 'saging' && this.itemHold > 9 && Math.abs(self.lastD) < 2) useItem = true;
         }
       }
     } else {

@@ -4,7 +4,7 @@ A colourful 3D browser racing game inspired by **kariling**, the traditional Fil
 
 Race three AI opponents around **Barangay Dash**, a coastal village circuit with dusty lanes, nipa huts, sari-sari stores, fiesta bunting and rice paddies. Manage your speed, stamina and the tyre's balance: take corners too hot and it wobbles (UNSTABLE) and then gets away from you (OUT OF CONTROL) — your runner has to chase it down. Watch out for potholes, mud, logs, humps, a jump, roadside canals, dog poo and the local askals.
 
-> **Status:** Phase 1 and Milestone 1.5 (tyre-control states, collisions, street hazards) are complete and ready for playtesting. See [docs/HANDOVER.md](docs/HANDOVER.md) (current state, systems, known issues), [PROGRESS.md](PROGRESS.md) and [docs/GAME_SPEC.md](docs/GAME_SPEC.md).
+> **Status:** Phase 1 and Milestones 1.5–1.6 are ready for playtesting, including the first four power-ups. See [docs/HANDOVER.md](docs/HANDOVER.md) (current state, systems, known issues), [PROGRESS.md](PROGRESS.md) and [docs/GAME_SPEC.md](docs/GAME_SPEC.md).
 
 ## Requirements
 
@@ -26,6 +26,9 @@ Then open http://localhost:5173. The dev server also listens on your LAN (`--hos
 | Action | Keyboard | Touch |
 |---|---|---|
 | Push (accelerate) | W / ↑ | **PUSH** (hold) |
+| Dash | Double-tap W / ↑ | Double-tap **PUSH** |
+| Use power-up / throw Buko forward | E | Item button |
+| Roll Buko backward | Q | **BACK** when Buko is held |
 | Steer | A D / ← → | Steering pad (left thumb; slide for finer control) |
 | Brake | S / ↓ | **BRAKE** |
 | Balance (steady a wobbling tyre) | Space | **BALANCE** |
@@ -36,9 +39,9 @@ Then open http://localhost:5173. The dev server also listens on your LAN (`--hos
 Tips:
 - The faster you go, the less steering the tyre tolerates. Ease off or tap brake before tight corners; when the chip says **UNSTABLE**, straighten up, slow down or hold Balance.
 - Small humps are fine; take the big ramp too fast or land leaning and you'll lose it.
-- Steer around potholes, mud and poo. If the tyre gets dirty, stop briefly — the runner cleans it.
+- Steer around potholes, mud and poo. If the tyre gets dirty, slow down at the roadside to clean it, or keep racing until it wears off.
 - Keep away from the canal edges on the concrete straight.
-- Barking dog? Speed up — askals give up quickly.
+- Barking dog? Speed up to outrun it.
 - Accelerating hard tires the runner; steady speed or coasting recovers stamina. **Auto-push** (Settings) lets younger players just steer.
 
 Add `?debug` to the URL to start with the debug HUD on.

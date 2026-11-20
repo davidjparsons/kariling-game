@@ -2,9 +2,9 @@ import { PHYSICS, RACE, STICK_LENGTH } from '../config/gameplay';
 import type { StickConfig } from '../config/sticks';
 import { SURFACES, type SurfaceConfig, type SurfaceId } from '../config/surfaces';
 import type { TyreConfig } from '../config/tyres';
-import { DASH, EFFECT_LIMITS, ITEM_RULES, LANDING_BONUS, NEUTRAL_MODS, type EffectMods, type ItemId } from '../config/items';
+import { DASH, EFFECT_LIMITS, ITEM_RULES, ITEMS, TURON_TURBO, LANDING_BONUS, NEUTRAL_MODS, type EffectMods, type ItemId } from '../config/items';
 import { approach, clamp, damp, lerp, smoothstep, wrapAngle } from '../core/math';
-import { activateItem, createEffects, effectMods, tickEffects, type ActiveEffects } from './effects';
+import { createEffects, effectMods, tickEffects, type ActiveEffects } from './effects';
 
 /** Device-independent racer input. Keyboard, touch and AI all produce this. */
 export interface RacerInput {
@@ -19,7 +19,7 @@ export interface RacerInput {
   /** One-shot: the push control was double-tapped (dash). */
   dash?: boolean;
   /** One-shot: use the held item. */
-  useItem?: boolean;
+  useItem?: boolean | 'backward';
 }
 
 export const NO_INPUT: RacerInput = Object.freeze({ steer: 0, push: 0, brake: 0, balance: false });
@@ -110,6 +110,8 @@ export interface RacerPhysicsState {
   /** Held item (one at a time) and the roulette time left before it can be used. */
   item: ItemId | null;
   itemReveal: number;
+  itemCooldown: number;
+  itemHitProtection: number;
   /** Most recently used item (for effects/sounds). */
   lastItem: ItemId | null;
   /** Launch factor of the ground most recently climbed (ramps ≈ 1). */
@@ -118,8 +120,6 @@ export interface RacerPhysicsState {
   rampAir: boolean;
   /** Seconds left to reconnect the scoop after a clean ramp landing. */
   catchWindow: number;
-  /** One-shot events raised outside stepRacer (shield blocks), reported on the next step. */
-  pendingEvents: number;
 }
 
 export const EV_TAP = 1;
@@ -148,8 +148,6 @@ export const EV_DASH = 1 << 19;
 export const EV_NICE_CATCH = 1 << 20;
 export const EV_ITEM_GET = 1 << 21;
 export const EV_ITEM_USE = 1 << 22;
-/** The coconut shield absorbed a hit. */
-export const EV_SHIELD_BLOCK = 1 << 23;
 /** Bumped into a pedestrian. */
 export const EV_PED = 1 << 24;
 
@@ -203,7 +201,7 @@ export function createRacerState(x: number, z: number, heading: number, runner?:
     stickContact: 1, separated: false, separatedTime: 0,
     pushPhase: 0, pushing: 0, stun: 0, invuln: 0, boost: 0, dirt: 0, cleaning: 0, impact: 0,
     stressCorner: 0, stressJerk: 0, stressRough: 0,
-    fx: createEffects(), item: null, itemReveal: 0, lastItem: null, lastLaunch: 0, rampAir: false, catchWindow: 0, pendingEvents: 0,
+    fx: createEffects(), item: null, itemReveal: 0, itemCooldown: 0, itemHitProtection: 0, lastItem: null, lastLaunch: 0, rampAir: false, catchWindow: 0,
   };
 }
 
@@ -260,11 +258,6 @@ export function loseControl(st: RacerPhysicsState, kind: LostKind): number {
  */
 export function addImpact(st: RacerPhysicsState, amount: number, ctx: PhysicsContext): number {
   if (amount <= 0 || st.control === 'lost') return 0;
-  if (st.fx.shieldHits > 0 && amount >= SHIELD_MIN_HIT) {
-    // Coconut shield: soaks up one moderate hit almost completely, then pops.
-    consumeShield(st);
-    amount *= 0.15;
-  }
   const scaled = amount * ctx.tyre.instabilityMul * (st.invuln > 0 ? 0.25 : 1);
   st.impact = Math.max(st.impact, scaled);
   st.instability += scaled;
@@ -277,21 +270,11 @@ export function addImpact(st: RacerPhysicsState, amount: number, ctx: PhysicsCon
 /** Dog catch / cartoon stun. Returns false if the racer is protected. */
 export function applyStun(st: RacerPhysicsState, ctx: PhysicsContext): boolean {
   if (st.invuln > 0 || st.stun > 0 || st.control === 'lost') return false;
-  if (st.fx.shieldHits > 0) { consumeShield(st); st.invuln = Math.max(st.invuln, 1.5); return false; }
   st.stun = PHYSICS.stunTime;
   st.speed *= PHYSICS.stunSpeedKeep;
   st.invuln = PHYSICS.stunTime + PHYSICS.invulnerableAfterStun;
   addImpact(st, PHYSICS.stunInstability / ctx.tyre.instabilityMul, ctx);
   return true;
-}
-
-/** Smallest impact the coconut shield bothers to absorb (it ignores everyday jostles). */
-const SHIELD_MIN_HIT = 0.12;
-
-function consumeShield(st: RacerPhysicsState): void {
-  st.fx.shieldHits--;
-  if (st.fx.shieldHits <= 0) { st.fx.shieldHits = 0; st.fx.item.buko = 0; }
-  st.pendingEvents |= EV_SHIELD_BLOCK;
 }
 
 /** Give a racer an item (from a pickup). The roulette must finish before it can be used. */
@@ -348,13 +331,14 @@ export function stepRacer(st: RacerPhysicsState, input: RacerInput, ctx: Physics
   st.invuln = Math.max(0, st.invuln - dt);
   st.boost = Math.max(0, st.boost - dt);
   st.impact = Math.max(0, st.impact - dt * 2);
-  events |= st.pendingEvents;
-  st.pendingEvents = 0;
   tickEffects(st.fx, dt);
   st.itemReveal = Math.max(0, st.itemReveal - dt);
+  st.itemCooldown = Math.max(0, st.itemCooldown - dt);
+  st.itemHitProtection = Math.max(0, st.itemHitProtection - dt);
   // Use the held item (any time the tyre isn't loose).
-  if (input.useItem && st.item && st.itemReveal <= 0 && st.control !== 'lost') {
-    st.stamina = Math.min(1, st.stamina + activateItem(st.fx, st.item));
+  if (input.useItem && st.item && (input.useItem !== 'backward' || st.item === 'buko') && st.itemReveal <= 0 && st.itemCooldown <= 0 && st.control !== 'lost' && !st.needsRespawn) {
+    if (st.item === 'turon') st.fx.turbo = TURON_TURBO.duration;
+    st.itemCooldown = ITEMS[st.item].cooldown;
     st.lastItem = st.item;
     st.item = null;
     events |= EV_ITEM_USE;

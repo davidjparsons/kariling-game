@@ -1,6 +1,6 @@
 # KARILING — Progress Log
 
-_Last updated: 2026-11-21 (session 3 — Milestone 1.6). Start a new session with **`docs/HANDOVER.md`**._
+_Last updated: 2026-11-21 (Milestone 1.6, revised power-ups). Start a new session with **`docs/HANDOVER.md`**._
 
 ## At a glance
 
@@ -21,7 +21,7 @@ _Last updated: 2026-11-21 (session 3 — Milestone 1.6). Start a new session wit
 - Known issues: see `docs/HANDOVER.md` §11 (start-line specks in the menu, canal state hack, lingering banner, a misleading config comment).
 - Phase 2 (customisation UI, 3 tracks, track elevation), Phase 3 (Cloudflare Workers/D1, identity, leaderboards), Phase 4 (Durable Object multiplayer), gamepad support, code splitting.
 
-**Last verified (2026-11-21, session 3):** `pnpm typecheck` ✔ · `pnpm lint` ✔ · `pnpm test` ✔ 124/124 · `pnpm build` ✔. Git: local `main`, Milestone 1.6 commits **not pushed**.
+**Last verified (2026-11-21, revised power-ups):** `pnpm typecheck` ✔ · `pnpm lint` ✔ · `pnpm test` ✔ 131/131 · `pnpm build` ✔. GitHub `main` includes Milestone 1.6 through `a8473f1`.
 
 ## Milestone 1.6 — gameplay improvements, fixes and Filipino power-ups (session 3)
 
@@ -39,12 +39,12 @@ Brief: `docs/GAME_SPEC.md` §26. Worked in the requested order; each step is its
 | Dog poo | Done | Never forced to stop: **A)** slow down near the road edge / on the verge → 0.9 s clean, full fix; **B)** race on with −16 % top speed / −25 % grip / +40 % wobble that stays near full strength, then wears off over 15 s, with a green stink trail. Bots: Easy cleans, Normal cleans fresh dirt, Hard races on. |
 | Double-tap dash | Done | Double-tap W/↑ or the PUSH button (0.32 s window) → 0.75 s dash: ×1.7 accel, ×1.06 top speed, −14 % stamina, +wobble, ×0.82 steering response, ×1.45 instability; 3.2 s cooldown; needs stamina; sound + toast + particles. Bots dash on straights. |
 | Ramp landing bonus | Done | Only after a real ramp take-off (launch ≥ 0.9, vy ≥ 0.8), ≥ 0.25 s air, landing severity ≤ 0.68 (a severe crash is 0.8), scoop back on within 1.3 s: 1.1 s ×1.45 accel; "Nice Catch!" toast + bubble, sparkle, arpeggio. Once per jump (flags cleared on landing and respawn). |
-| Power-ups | Done | 12 parol (star-lantern) pickups in 4 rows; weighted random item by race position; one item held; 1 s roulette; 6 s respawn; HUD slot (E key or touch button left of BRAKE). Buko (Stability Shield, absorbs one hit/bite), Corn Chips (Crunch Boost), Crackers (Recovery), Pandesal (Endurance), Turon (Golden Roll), Cola sa Plastik (Sugar Rush → crash). Combined modifiers are capped; reuse refreshes, never stacks. Original 3D snack models, trails, sounds. Bots aim for boxes and use items situationally. All values in `src/config/items.ts`. |
+| Power-ups | Implemented | 12 parol pickups with position-weighted selection, one held item, a 1 s reveal and 6 s pickup respawn. The four-item lineup is Buko Missile (forward throw / backward roll), Saging Peel (drop behind), SkyFlakes Cracker Shot (forward projectile) and Turon Turbo (temporary speed and acceleration). Humans and bots share use cooldowns and hit protection. The projectile simulation samples track height and surfaces and uses tyre-specific hit physics. |
 | Pedestrians | Done | 3 crossing points × 2 villagers (sim, deterministic) + 4 chatting/cheering groups behind the fence (scenery). Crossers look, hesitate, cross, dodge, get startled when bumped (racer ×0.72 speed + wobble; 2.5 s no re-bump); never step out with < 1.6 s for the racer to react; never stuck. Bots avoid them. One skinned draw call per villager. |
 | Basketball court | Done | Replaces the old bare court far in the infield: placed just behind the roadside fence (~0.1 lap), painted markings, hoops/backboards/rims, chain-link fence, bench, cooler, sign; 6 players (4 on Low) on a dribble → pass → drive → shoot → rebound loop; positional bounce sound. |
 
-### Milestone 1.6 tests (124 total, all passing)
-New: `tests/character.test.ts` (leg IK round-trip, knees never hyper-extend, clamp; child + adult feet never sink and one stays planted while running on flat/slope/humps; every FK pose rests on the ground; arm IK reaches with the elbow flexing one way), `tests/dogs.test.ts` (slow caught, fast escapes, repeat warnings, no re-bite, stays inside fences), `tests/terrain.test.ts` (grass accel/top speed/rolling resistance, MTB vs road tyre, lumpy patches, race ground reports grass/roadside/patchiness), `tests/items.test.ts` (double-tap detection, dash burst/stamina/wobble/cooldown/steering, landing bonus once / not for bumps or crawling, weighted selection by position, reveal → use → expiry, per-item effects, sugar crash, caps + refresh, shield, pickup respawn + one item held), `tests/pedestrians.test.ts` (state cycle, never steps out unfairly over 40 seeds, dodge + never stuck, bump effects + cooldown, bot races with crossings finish). Updated `tests/hazards.test.ts` for both poo options.
+### Milestone 1.6 tests (131 total, all passing)
+New: `tests/character.test.ts` (leg IK round-trip, knees never hyper-extend, clamp; child + adult feet never sink and one stays planted while running on flat/slope/humps; every FK pose rests on the ground; arm IK reaches with the elbow flexing one way), `tests/dogs.test.ts` (slow caught, fast escapes, repeat warnings, no re-bite, stays inside fences), `tests/terrain.test.ts` (grass accel/top speed/rolling resistance, MTB vs road tyre, lumpy patches, race ground reports grass/roadside/patchiness), `tests/items.test.ts` (double-tap detection, dash burst/stamina/wobble/cooldown/steering, landing bonus once / not for bumps or crawling, weighted selection by position, reveal → use → expiry, Turon caps, projectile direction and expiry, tyre-specific hits and repeat-hit protection, Buko bounce and grass drag, pickup respawn + one item held), `tests/pedestrians.test.ts` (state cycle, never steps out unfairly over 40 seeds, dodge + never stuck, bump effects + cooldown, bot races with crossings finish). Updated `tests/hazards.test.ts` for both poo options.
 
 ### Balance snapshot (headless, 4 bots, 3 laps, everything on)
 | Bots | Typical race | Notes |
@@ -58,11 +58,10 @@ Pedestrian bumps: 0–1 per bot per race. Crossings started: ~36–49 per race.
 ### Milestone 1.6 known issues / not done
 - **Not hand-played** and **not tested on real phones/iPads**; audio for the new sounds not listened to.
 - Draw calls rose with villagers, court and pickups: measured in a race ≈ Low 235 / Medium 426 / High 435 (were ≈ 190 / 360 / 250–370). Phone FPS unverified.
-- Feet slip a little at sprint speeds (cadence is capped at 17 rad/s rather than splaying the legs).
+- Claude’s original sprint gait is in use. Some foot sliding can occur at full speed.
 - Villagers' feet are rigid with the shin (no ankle) and walk on flat ground only; crossings are placed on flat road.
 - Court players follow a simple script; the shot always "goes in" and the ball teleports to the rebounder.
-- The scoop clearance is approximate (one lowest point); extreme leans on raised ground can still graze.
-- Generic display names for branded snacks (see spec §26.9).
+- Claude’s original scoop clearance is in use. Extreme leans on raised ground can still graze.
 
 ## Current phase
 

@@ -1131,7 +1131,7 @@ This section records how the brief has actually been implemented so far. Where i
 - Real airborne motion off humps, mounds, logs, potholes and a dirt ramp; landings scored by impact, lean, steering and air time.
 - Collisions between tyres, runners and sticks for all racers.
 - Hazards on Barangay Dash: 2 cement humps, an old-tyre speed strip, 2 dirt mounds, a log, 3 flat motorbike tyres, 2 frond piles, a dirt ramp, 5 potholes in 2 clusters, 2 mud patches, 2 boost pads, 3 dog poos, roadside canals on both sides of the concrete straight, and 3 street dogs.
-- "Power-ups" are limited to boost pads (no item system).
+- At this milestone the track had boost pads. The held-item system is specified in §26.6.
 - Results, local personal bests and race history; online leaderboards and multiplayer buttons are placeholders.
 
 **Architecture now:** Vite + strict TypeScript + three.js; deterministic render-free simulation in `src/sim` (fixed 60 Hz) driven by `src/game/raceController.ts` with interpolated rendering; data-driven configs in `src/config`; procedural geometry, textures and audio (no external assets except the Google font). Designed so `RaceSession` can later run server-side for authoritative multiplayer.
@@ -1177,12 +1177,24 @@ less precise steering, cooldown, feedback. Ramp landing bonus only for a real ra
 reconnecting the scoop within a short window and no severe crash; once per landing; effect + sound +
 "Nice Catch!".
 
-## 26.6 Power-ups
-Original Filipino pickup objects on the track; random weighted item; one held at a time; HUD slot and
-activation button (touch-friendly); AI collects and uses items; configurable durations, strengths,
-cooldowns; no runaway stacking; compatible with the three control states. Items: Buko — Stability
-Shield; Chippy-style corn chips — Crunch Boost; SkyFlakes-style crackers — Recovery Boost; Pandesal —
-Endurance; Turon — Golden Roll; cola in a tied plastic bag — Sugar Rush (with crash). No logos.
+## 26.6 First power-up milestone
+
+Parols give one held item, chosen with race-position weights. The HUD reveals the item after one
+second. Pickup respawn, item reuse cooldowns, projectile lifetimes and hit protection are configurable.
+Humans and bots collect, activate and take hits under the same rules. Hits can affect a racer in
+CONTROLLED or UNSTABLE. OUT OF CONTROL and protected racers cannot be hit by another item.
+
+| Item | Action |
+|---|---|
+| Buko Missile | Throw a whole young green coconut forward or roll it backward. It bounces and rolls across the actual track surface, exchanges speed on bumps and slopes, and slows more off-road. It travels along its launch heading until terrain deflects it. A direct tyre hit reduces speed and adds instability based on relative speed, hit angle and tyre properties. A hard hit can send the tyre out of control. Racers can change lanes to dodge. |
+| Saging Peel | Drop a visible banana peel behind the runner. It stays on the track until a tyre rolls over it or it expires. Contact slows and unsettles the tyre. |
+| SkyFlakes Cracker Shot | Fire a fast, short-lived straight shot ahead. A hit slows the tyre and adds a smaller wobble than a hard coconut hit. The cracker model uses no packaging or logo. |
+| Turon Turbo | Briefly increase acceleration and top speed and reduce rolling resistance. Its speed and acceleration bonuses share the existing caps with dash and boost pads. |
+
+E or the touch item button activates the held item. Buko uses E to throw forward and Q or the
+touch **Back** button to roll backward. Use a whole green 3D coconut, an incoming warning for
+the player, and playful sound and particles on impact. Buko is the primary straight-shot,
+shell-style weapon. Reserve homing for Tirador in a later milestone.
 
 ## 26.7 Pedestrians and basketball court
 Villagers (adults and children) in groups near homes/shops and crossing at selected points, aware of
@@ -1198,5 +1210,4 @@ invariants; typecheck, lint, tests, build; browser verification; logical commits
 
 ## 26.9 As built
 See `PROGRESS.md` (Milestone 1.6) and `docs/HANDOVER.md` for design decisions, values and known issues.
-Display names for branded snacks are generic ("Corn Chips", "Crackers", "Cola sa Plastik") to avoid
-trademarks; ids keep the brief's names and can be renamed in `src/config/items.ts`.
+Item tuning and display names live in `src/config/items.ts`.
