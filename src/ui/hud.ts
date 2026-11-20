@@ -19,6 +19,8 @@ export interface HudState {
   phys: RacerPhysicsState;
 }
 
+export type Tone = 'info' | 'good' | 'warn' | 'bad';
+
 const RACER_COLORS = ['#ff9800', '#ff4f8b', '#ffd600', '#3ddc84', '#7c4dff'];
 
 /** HTML/CSS racing HUD + on-screen touch controls. */
@@ -29,7 +31,7 @@ export class Hud {
   private miniBase: HTMLCanvasElement;
   private miniXf: (x: number, z: number) => [number, number];
   private msgTimer = 0;
-  private noticeTimer = 0;
+  private toasts = new Map<string, { el: HTMLElement; time: number }>();
   private debugOn = false;
   private debugTick = 0;
   private tags: HTMLElement[] = [];
@@ -54,12 +56,13 @@ export class Hud {
         <canvas class="minimap" width="200" height="200"></canvas>
         <button class="hud-pause" data-touch="pause" aria-label="Pause">II</button>
       </div>
+      <div class="hud-toasts" data-k="toasts" aria-live="polite"></div>
       <div class="hud-meters">
         <div class="speed"><b data-k="speed">0</b><span>km/h</span></div>
         <div class="meter"><label>STAMINA</label><div class="bar"><i data-k="stam"></i></div></div>
         <div class="meter"><label>BALANCE</label><div class="bar balance"><i data-k="bal"></i></div></div>
       </div>
-      <div class="hud-center"><div class="hud-msg" data-k="msg"></div><div class="hud-warn" data-k="warn"></div><div class="hud-notice" data-k="notice"></div></div>
+      <div class="hud-center"><div class="hud-msg" data-k="msg"></div></div>
       <div class="hud-tags"></div>
       <div class="touch ${showTouch ? '' : 'hidden'}">
         <div class="touch-left">
@@ -128,15 +131,14 @@ export class Hud {
     e.bal.style.width = `${Math.round(bal * 100)}%`;
     e.bal.parentElement!.classList.toggle('low', s.instability > 0.6);
     const p = s.phys;
-    let warn = '';
-    if (s.wrongWay) warn = 'WRONG WAY!';
-    else if (p.control === 'lost') warn = p.lostPhase === 'canal' ? 'Splash!' : p.lostPhase === 'pickup' ? 'Picking it up…' : 'Catch your tyre!';
-    else if (p.stun > 0) warn = 'Dizzy!';
-    else if (p.cleaning > 0) warn = 'Cleaning the tyre…';
-    else if (p.control === 'unstable') warn = 'WOBBLE! Ease off & straighten';
-    e.warn.textContent = warn;
-    e.warn.classList.toggle('show', warn !== '');
-    e.warn.classList.toggle('calm', p.cleaning > 0);
+    // Ongoing conditions: one compact status toast at the screen edge (never mid-road).
+    let warn: [string, string, Tone] | null = null;
+    if (s.wrongWay) warn = ['↩', 'Wrong way!', 'bad'];
+    else if (p.control === 'lost') warn = p.lostPhase === 'canal' ? ['💦', 'Splash!', 'bad'] : p.lostPhase === 'pickup' ? ['🛞', 'Picking it up…', 'info'] : ['🛞', 'Catch your tyre!', 'bad'];
+    else if (p.stun > 0) warn = ['💫', 'Dizzy!', 'bad'];
+    else if (p.cleaning > 0) warn = ['🧽', 'Cleaning…', 'info'];
+    else if (p.control === 'unstable') warn = ['⚠', 'Wobble — ease off', 'warn'];
+    if (warn) this.toast('status', warn[0], warn[1], 0.25, warn[2]);
     // Control-state chip: green / amber / red.
     const st = p.control === 'lost' ? 'OUT OF CONTROL' : p.control === 'unstable' ? 'UNSTABLE' : 'CONTROLLED';
     e.state.textContent = st + (p.boost > 0 ? ' · BOOST' : '') + (p.dirt > 0.05 ? ' · DIRTY' : '') + (p.invuln > 0 ? ' · SAFE' : '');
@@ -156,6 +158,7 @@ export class Hud {
     }
   }
 
+  /** Big centred text — reserved for the countdown, laps and the finish. */
   message(text: string, seconds = 1.4, cls = ''): void {
     const m = this.el.msg;
     m.textContent = text;
@@ -163,12 +166,60 @@ export class Hud {
     this.msgTimer = seconds;
   }
 
-  /** Short helper line under the main message (tips, hazard warnings). */
-  notice(text: string, seconds = 1.5): void {
-    const n = this.el.notice;
-    n.textContent = text;
-    n.classList.add('show');
-    this.noticeTimer = seconds;
+  /**
+   * Small, translucent notification at the screen edge (warnings, hazards, boosts, recoveries).
+   * Toasts with the same key replace each other, at most three show at once, and they fade.
+   */
+  toast(key: string, icon: string, text: string, seconds = 1.5, tone: Tone = 'info'): void {
+    let t = this.toasts.get(key);
+    if (!t) {
+      const el = document.createElement('div');
+      el.className = 'toast';
+      el.innerHTML = '<i></i><span></span>';
+      this.el.toasts.prepend(el);
+      t = { el, time: 0 };
+      this.toasts.set(key, t);
+      requestAnimationFrame(() => el.classList.add('show'));
+      // Never stack more than three: drop the oldest.
+      while (this.toasts.size > 3) {
+        let oldest: string | null = null, min = Infinity;
+        for (const [k, v] of this.toasts) if (k !== key && v.time < min) { min = v.time; oldest = k; }
+        if (!oldest) break;
+        this.removeToast(oldest);
+      }
+    }
+    t.el.dataset.tone = tone;
+    (t.el.firstChild as HTMLElement).textContent = icon;
+    (t.el.lastChild as HTMLElement).textContent = text;
+    t.time = seconds;
+  }
+
+  /** Short helper line (tips, hazard warnings). */
+  notice(text: string, seconds = 1.5, icon = 'ℹ', tone: Tone = 'info'): void {
+    this.toast('notice', icon, text, seconds, tone);
+  }
+
+  private removeToast(key: string): void {
+    const t = this.toasts.get(key);
+    if (!t) return;
+    this.toasts.delete(key);
+    t.el.classList.remove('show');
+    setTimeout(() => t.el.remove(), 220);
+  }
+
+  /** Item slot contents (null = empty). */
+  setItem(icon: string | null, name: string): void {
+    const slot = this.el.item;
+    if (!slot) return;
+    slot.classList.toggle('empty', !icon);
+    this.el.itemIcon.textContent = icon ?? '';
+    slot.setAttribute('aria-label', icon ? `Use ${name}` : 'No item');
+    this.el.itemName.textContent = icon ? name : '';
+  }
+
+  /** Brief item-roulette flash while a pickup is being revealed. */
+  setItemRolling(rolling: boolean): void {
+    this.el.item?.classList.toggle('rolling', rolling);
   }
 
   setDebug(on: boolean): void {
@@ -177,9 +228,9 @@ export class Hud {
   }
 
   tick(dt: number): void {
-    if (this.noticeTimer > 0) {
-      this.noticeTimer -= dt;
-      if (this.noticeTimer <= 0) this.el.notice.classList.remove('show');
+    for (const [k, t] of this.toasts) {
+      t.time -= dt;
+      if (t.time <= 0) this.removeToast(k);
     }
     if (this.msgTimer > 0) {
       this.msgTimer -= dt;

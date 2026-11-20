@@ -185,8 +185,12 @@ export function buildHazards(field: HazardField, shadows: boolean): HazardBuild 
         const chev = new THREE.Shape();
         chev.moveTo(-0.9, -0.25); chev.lineTo(0, 0.35); chev.lineTo(0.9, -0.25); chev.lineTo(0.9, 0.1); chev.lineTo(0, 0.7); chev.lineTo(-0.9, 0.1); chev.closePath();
         const cg = new THREE.ShapeGeometry(chev);
-        cg.rotateX(-Math.PI / 2);
+        // Shape +y is the arrow tip. rotateX(-90°) would send it to local −z (backwards along
+        // the track), so lay it flat with +y → +z instead: arrows point in the racing direction.
+        cg.rotateX(Math.PI / 2);
         cg.scale(wid / 2, 1, 1.2);
+        // rotateX(+90°) flips the face downwards; restore an upward normal and winding.
+        flipFaces(cg);
         const mats: THREE.MeshStandardMaterial[] = [];
         for (let i = 0; i < 3; i++) {
           const m = decal(new THREE.MeshStandardMaterial({ color: 0xffb300, emissive: 0xff6d00, emissiveIntensity: 0.6, roughness: 0.4 }));
@@ -296,6 +300,18 @@ function buildCanals(field: HazardField): THREE.Group {
   wgeo.computeVertexNormals();
   g.add(new THREE.Mesh(wgeo, new THREE.MeshStandardMaterial({ color: 0x3d4f3a, roughness: 0.1, metalness: 0.2, side: THREE.DoubleSide })));
   return g;
+}
+
+/** Reverse triangle winding and normals (after a mirroring transform). */
+function flipFaces(g: THREE.BufferGeometry): void {
+  const idx = g.getIndex();
+  if (idx) {
+    const a = idx.array as Uint16Array | Uint32Array;
+    for (let i = 0; i < a.length; i += 3) { const t = a[i + 1]; a[i + 1] = a[i + 2]; a[i + 2] = t; }
+    idx.needsUpdate = true;
+  }
+  const n = g.getAttribute('normal');
+  if (n) { for (let i = 0; i < n.count; i++) n.setXYZ(i, -n.getX(i), -n.getY(i), -n.getZ(i)); n.needsUpdate = true; }
 }
 
 /** Extrude the hazard's along-track height profile across its width (local x). */

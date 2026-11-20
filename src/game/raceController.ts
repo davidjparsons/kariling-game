@@ -197,7 +197,7 @@ export class RaceController {
     if (laps > this.lastLapShown && !p.progress.finished) {
       this.lastLapShown = laps;
       const final = laps === this.cfg.laps - 1;
-      this.hud.message(final ? 'FINAL LAP!' : `LAP ${laps + 1}`, 1.6, final ? 'final' : '');
+      this.hud.message(final ? 'FINAL LAP!' : `LAP ${laps + 1}`, 1.2, final ? 'final' : '');
       this.deps.audio.lap(final);
     }
     if (p.progress.finished && this.finishedAt === null) {
@@ -224,15 +224,15 @@ export class RaceController {
         if (near) a.fall();
         this.burstDust(r, 16);
         view.react(r.phys.lostKind === 'impact' ? 'ARAY!' : 'AY!', null, 1.0, '#ffe082');
-        if (me) { this.hud.message('OUT OF CONTROL!', 1.4, 'final'); this.shake = 0.35; }
+        if (me) { this.hud.toast('event', '🛞', 'Out of control!', 1.3, 'bad'); this.shake = 0.35; }
       }
       if (e & EV_CANAL) {
         if (near) a.splash();
         this.burstSplash(r.phys.x, -0.6, r.phys.z, 0x7fa2a8, 22);
         view.react('AY NAKU!', null, 1.4, '#ffe082');
-        if (me) this.hud.message('IN THE CANAL!', 1.6, 'final');
+        if (me) this.hud.toast('event', '💦', 'In the canal!', 1.5, 'bad');
       }
-      if (e & EV_RECOVERED && me) a.recover();
+      if (e & EV_RECOVERED && me) { a.recover(); this.hud.toast('event', '✔', 'Back in control', 1, 'good'); }
       if (e & EV_UNSTABLE && me) a.wobbleWarn();
       if (e & EV_LAUNCH && near) a.whoosh(Math.min(1, r.phys.vy / 3 + 0.3));
       if (e & EV_LAND) {
@@ -240,23 +240,23 @@ export class RaceController {
         this.burstDust(r, 6);
         if (me && r.phys.impact > 0.25) this.shake = Math.max(this.shake, 0.2);
       }
-      if (e & EV_SEPARATE && me && r.phys.control !== 'lost') this.hud.notice('Catch up with your tyre!', 1.2);
+      if (e & EV_SEPARATE && me && r.phys.control !== 'lost') this.hud.notice('Catch your tyre!', 1.2, '🏃', 'warn');
       if (e & EV_CATCH && me) a.catchTyre();
       if (e & EV_BOOST) {
         if (near) a.boost();
-        if (me) this.hud.message('BOOST!', 0.9, 'go');
+        if (me) this.hud.toast('boost', '⚡', 'Boost!', 1, 'good');
       }
       if (e & EV_POO) {
         view.react('EWW!', 'eww', 1.2, '#c5e1a5');
         if (near) a.squish();
-        if (me) this.hud.notice('Dirty tyre! Slow right down to clean it', 2.5);
+        if (me) this.hud.notice('Poo! Stop on the side to clean — or race on', 2.5, '💩', 'warn');
       }
       if (e & EV_CLEAN_START) view.react('Linis!', null, 0.9);
-      if (e & EV_CLEANED) { if (me) { a.clean(); this.hud.notice('Clean! Go go go!', 1); } this.sparkle(r, 0xffffff, 10); }
+      if (e & EV_CLEANED) { if (me) { a.clean(); this.hud.notice('Clean! Go go go!', 1, '✨', 'good'); } this.sparkle(r, 0xffffff, 10); }
       if (e & EV_STUN) {
         if (near) a.stun();
         view.react('ARAY!', null, 1.1, '#ffccbc');
-        if (me) { this.hud.message('BITTEN!', 1, 'final'); this.shake = 0.3; }
+        if (me) { this.hud.toast('event', '🐕', 'Bitten!', 1.1, 'bad'); this.shake = 0.3; }
       }
       if (e & EV_RESPAWN) this.sparkle(r, 0xffffff, 14);
       if (e & EV_BUMP && near && r.bumpImpact > 1) a.bump(r.bumpImpact);
@@ -274,7 +274,7 @@ export class RaceController {
       if (ev.type === 'bark') {
         dv.say('ARF! ARF!', 1.0, '#fff59d');
         if (close) a.bark();
-        if (ev.racer === s.racers.indexOf(p)) this.hud.notice('Askal! Outrun it!', 1.5);
+        if (ev.racer === s.racers.indexOf(p)) this.hud.toast('dog', '🐕', 'Askal! Outrun it!', 1.6, 'warn');
       } else if (ev.type === 'catch') {
         dv.say('GRRR!', 0.8);
         if (close) a.bark();
