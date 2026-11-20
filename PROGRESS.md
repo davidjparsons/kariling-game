@@ -1,31 +1,72 @@
 # KARILING — Progress Log
 
-_Last updated: 2026-11-21 (end of session 2 — handover). Start a new session with **`docs/HANDOVER.md`**._
+_Last updated: 2026-11-21 (session 3 — Milestone 1.6). Start a new session with **`docs/HANDOVER.md`**._
 
 ## At a glance
 
 **Implemented**
 - Phase 1: single-player Barangay Dash race vs 3 bots, laps/checkpoints/timing, HUD, results, local records, settings, touch + keyboard controls, synthesised audio, Low/Medium/High graphics.
+- Milestone 1.6 (session 3): rebuilt runner rig (pelvis-mounted legs, planted-foot leg IK on the race ground, natural arm IK, stick/scoop ground clearance), forward-pointing boost arrows, compact edge toasts instead of centre warnings, taller flat tyres and painted humps, longer road-aware dog chases with no repeat bites, real grass physics, two-option dog poo, double-tap dash, ramp "Nice Catch!" bonus, Filipino snack power-ups with parol pickups, crossing villagers, a barangay basketball court with a pick-up game.
 - Milestone 1.5: three-state tyre control (CONTROLLED/UNSTABLE/OUT OF CONTROL), speed-dependent handling, airborne jumps and landings, simulated runner with stick contact and separation, racer collisions (tyre/runner/stick), 7 obstacle types, potholes, mud, roadside canals with safe respawn, boost pads, street dogs with stun, dog poo with cleaning, hazard-aware AI, debug HUD, upgraded tyre/character/stick/scoop/building models, mobile draw-call optimisation.
 
 **Partially implemented**
 - Customisation: data types, builders and bot looks support every option (age, gender, hair, skin, clothes, footwear, 4 tyres, tyre paint, 2 sticks), but there is **no customisation screen**; the player's loadout is fixed.
 - Tracks: only Barangay Dash. The other three are shown locked.
-- Power-ups: boost pads only; no item/power-up system.
 - Mobile: layout, touch and quality tiers done; **real-device performance and Safari behaviour untested**.
 - Audio: all events have sounds; **never listened to** in testing.
 - Leaderboards: local personal bests only.
 
 **Outstanding**
-- Human playtest and tuning of Milestone 1.5 (next step).
+- Human playtest and tuning of Milestones 1.5 + 1.6 (next step).
 - Known issues: see `docs/HANDOVER.md` §11 (start-line specks in the menu, canal state hack, lingering banner, a misleading config comment).
 - Phase 2 (customisation UI, 3 tracks, track elevation), Phase 3 (Cloudflare Workers/D1, identity, leaderboards), Phase 4 (Durable Object multiplayer), gamepad support, code splitting.
 
-**Last verified (2026-11-21):** `pnpm typecheck` ✔ · `pnpm lint` ✔ · `pnpm test` ✔ 71/71 · `pnpm build` ✔. Git: local `main` has one unpushed handover commit on top of `d11544a` (pushed).
+**Last verified (2026-11-21, session 3):** `pnpm typecheck` ✔ · `pnpm lint` ✔ · `pnpm test` ✔ 124/124 · `pnpm build` ✔. Git: local `main`, Milestone 1.6 commits **not pushed**.
+
+## Milestone 1.6 — gameplay improvements, fixes and Filipino power-ups (session 3)
+
+Brief: `docs/GAME_SPEC.md` §26. Worked in the requested order; each step is its own commit.
+
+| Area | Status | What changed (and why) |
+|---|---|---|
+| Character rig | Done | **Causes found:** hips hung from the body root while the pelvis mesh rotated with the torso; knee balls (r 0.041) were far thinner than trouser legs (r 0.066) so bends opened gaps; the default leg chain was 5 cm longer than the hip height (feet in the road); the arm IK rotated the upper arm *away* from its pole (elbow up/inward) and then picked whichever elbow sign "worked". **Fix:** translating pelvis carries the hips; waist joint with overlapping shirt; joint balls sized to the limbs; standing height derived from leg length + sole; planted-foot two-bone leg IK (knees only bend forward) sampling the race ground under each foot (humps/ramps/slopes), pelvis dropping only as far as needed; FK poses (fall, recover, clean, stun…) snap the lowest foot to the ground; feet follow the slope; arm IK rewritten with an explicit elbow position and a one-way hinge. |
+| Stick / scoop / tyre contact | Done | Grip planned from the real shoulder at one stick length from the scoop, with a small push-pull pump; scoop rolls up the tread when the ground behind the tyre is higher; loose stick never points through the ground; a leaning tyre rests on its shoulder; the road and decals moved from y ≈ 0.03–0.05 down to the simulation's y = 0 plane (tyres and feet had been sinking into the visible road). |
+| Boost arrows | Done | Chevrons were laid with `rotateX(−90°)`, which sends the tip backwards along the track; now laid tip-forward with corrected normals, using the track tangent (works on curves). |
+| Warnings | Done | Centre banners/warn/notice replaced by **toasts** under the minimap: icon + short text, translucent, max 3, keyed (no duplicates), fade in/out; status (wobble, dizzy, cleaning, catch your tyre, wrong way) is one toast. Centre text is smaller and kept for countdown/laps/finish. Phone landscape: toasts sit above the touch buttons. |
+| Obstacles | Done | Flat motorbike tyres: 16 cm collision ring, model sits fully above the road. Cement humps 18 cm × 2.1 m, cosine ramps (bounce + momentum loss, never a wall), stripes now actually render (the extrusion was one triangle strip across the road), cat's-eye studs. Old-tyre strip raised to 14 cm. |
+| Dogs | Done | Tiring sprint 10.6 → 7.8 m/s over ≤ 6 s / 65 m (slow racers get caught, ≳ 11 m/s escapes); repeat warning barks + toast; steer round logs/ramps/mounds/canals and stay inside the fences; every dog ignores a racer bitten in the last 14 s. |
+| Grass | Done | Grip 0.74, roll 1.9, speed ×0.68, accel ×0.68; deterministic lumpy patches add instability (scaled by tyre affinity — MTB copes, road tyre struggles); clippings particles; render-only wheel jostle on rough ground. Fences still bound the verge, so it's never a free shortcut. |
+| Dog poo | Done | Never forced to stop: **A)** slow down near the road edge / on the verge → 0.9 s clean, full fix; **B)** race on with −16 % top speed / −25 % grip / +40 % wobble that stays near full strength, then wears off over 15 s, with a green stink trail. Bots: Easy cleans, Normal cleans fresh dirt, Hard races on. |
+| Double-tap dash | Done | Double-tap W/↑ or the PUSH button (0.32 s window) → 0.75 s dash: ×1.7 accel, ×1.06 top speed, −14 % stamina, +wobble, ×0.82 steering response, ×1.45 instability; 3.2 s cooldown; needs stamina; sound + toast + particles. Bots dash on straights. |
+| Ramp landing bonus | Done | Only after a real ramp take-off (launch ≥ 0.9, vy ≥ 0.8), ≥ 0.25 s air, landing severity ≤ 0.68 (a severe crash is 0.8), scoop back on within 1.3 s: 1.1 s ×1.45 accel; "Nice Catch!" toast + bubble, sparkle, arpeggio. Once per jump (flags cleared on landing and respawn). |
+| Power-ups | Done | 12 parol (star-lantern) pickups in 4 rows; weighted random item by race position; one item held; 1 s roulette; 6 s respawn; HUD slot (E key or touch button left of BRAKE). Buko (Stability Shield, absorbs one hit/bite), Corn Chips (Crunch Boost), Crackers (Recovery), Pandesal (Endurance), Turon (Golden Roll), Cola sa Plastik (Sugar Rush → crash). Combined modifiers are capped; reuse refreshes, never stacks. Original 3D snack models, trails, sounds. Bots aim for boxes and use items situationally. All values in `src/config/items.ts`. |
+| Pedestrians | Done | 3 crossing points × 2 villagers (sim, deterministic) + 4 chatting/cheering groups behind the fence (scenery). Crossers look, hesitate, cross, dodge, get startled when bumped (racer ×0.72 speed + wobble; 2.5 s no re-bump); never step out with < 1.6 s for the racer to react; never stuck. Bots avoid them. One skinned draw call per villager. |
+| Basketball court | Done | Replaces the old bare court far in the infield: placed just behind the roadside fence (~0.1 lap), painted markings, hoops/backboards/rims, chain-link fence, bench, cooler, sign; 6 players (4 on Low) on a dribble → pass → drive → shoot → rebound loop; positional bounce sound. |
+
+### Milestone 1.6 tests (124 total, all passing)
+New: `tests/character.test.ts` (leg IK round-trip, knees never hyper-extend, clamp; child + adult feet never sink and one stays planted while running on flat/slope/humps; every FK pose rests on the ground; arm IK reaches with the elbow flexing one way), `tests/dogs.test.ts` (slow caught, fast escapes, repeat warnings, no re-bite, stays inside fences), `tests/terrain.test.ts` (grass accel/top speed/rolling resistance, MTB vs road tyre, lumpy patches, race ground reports grass/roadside/patchiness), `tests/items.test.ts` (double-tap detection, dash burst/stamina/wobble/cooldown/steering, landing bonus once / not for bumps or crawling, weighted selection by position, reveal → use → expiry, per-item effects, sugar crash, caps + refresh, shield, pickup respawn + one item held), `tests/pedestrians.test.ts` (state cycle, never steps out unfairly over 40 seeds, dodge + never stuck, bump effects + cooldown, bot races with crossings finish). Updated `tests/hazards.test.ts` for both poo options.
+
+### Balance snapshot (headless, 4 bots, 3 laps, everything on)
+| Bots | Typical race | Notes |
+|---|---|---|
+| Easy | ~3:05 (2:56–3:18) | 4–11 items used, occasional bites/falls, clean their tyres |
+| Normal | ~2:55 (2:46–3:12) | |
+| Hard | ~2:33 (2:30–2:39) | race on with poo; Nice Catch earned when the ramp landing is clean |
+
+Pedestrian bumps: 0–1 per bot per race. Crossings started: ~36–49 per race.
+
+### Milestone 1.6 known issues / not done
+- **Not hand-played** and **not tested on real phones/iPads**; audio for the new sounds not listened to.
+- Draw calls rose with villagers, court and pickups: measured in a race ≈ Low 235 / Medium 426 / High 435 (were ≈ 190 / 360 / 250–370). Phone FPS unverified.
+- Feet slip a little at sprint speeds (cadence is capped at 17 rad/s rather than splaying the legs).
+- Villagers' feet are rigid with the shin (no ankle) and walk on flat ground only; crossings are placed on flat road.
+- Court players follow a simple script; the shot always "goes in" and the ball teleports to the rebounder.
+- The scoop clearance is approximate (one lowest point); extreme leans on raised ground can still graze.
+- Generic display names for branded snacks (see spec §26.9).
 
 ## Current phase
 
-**Phase 1 — complete. Milestone 1.5 (racing feel, collisions, street hazards; spec §24) — implemented, ready for playtesting.**
+**Phase 1 — complete. Milestones 1.5 and 1.6 (spec §24, §26) — implemented, ready for playtesting.**
 Phase 2 has **not** been started (stopped after this milestone for playtesting, as instructed).
 
 ## Milestone 1.5 — what's done

@@ -1,6 +1,6 @@
 # KARILING — Development Handover
 
-_Written 2026-11-21 at commit `d11544a` + this documentation commit, branch `main`._
+_Written 2026-11-21 at commit `d11544a`; updated in session 3 (Milestone 1.6), branch `main`._
 _Read this first in a new session, then `docs/GAME_SPEC.md` (requirements, source of truth) and `PROGRESS.md` (status log)._
 
 ---
@@ -11,11 +11,12 @@ _Read this first in a new session, then `docs/GAME_SPEC.md` (requirements, sourc
 |---|---|
 | Phase 1 — playable single-player race | **Complete** |
 | Milestone 1.5 — tyre-control states, collisions, street hazards, model upgrade (spec §24) | **Implemented, awaiting human playtest** |
+| Milestone 1.6 — rig/ground-contact fixes, toasts, dash, landing bonus, power-ups, pedestrians, court (spec §26) | **Implemented, awaiting human playtest** — see `PROGRESS.md` |
 | Phase 2 — customisation UI, 3 more tracks | **Not started** |
 | Phase 3 — Cloudflare backend / D1 / leaderboards | **Not started** (nothing provisioned) |
 | Phase 4 — multiplayer (Durable Objects) | **Not started** |
-| Git | `main`, clean except this handover commit. Pushed to `github.com/davidjparsons/kariling-game` (public, by the owner's choice) up to `d11544a`. **This handover commit is not pushed.** |
-| Checks (2026-11-21) | `pnpm typecheck` ✔ · `pnpm lint` ✔ · `pnpm test` ✔ 71/71 · `pnpm build` ✔ (JS 754.8 kB / 205.5 kB gzip, CSS 14.8 kB) |
+| Git | `main`. Pushed to `github.com/davidjparsons/kariling-game` (public, by the owner's choice) up to `d11544a`. **The handover commit and all Milestone 1.6 commits are not pushed.** |
+| Checks (2026-11-21, session 3) | `pnpm typecheck` ✔ · `pnpm lint` ✔ · `pnpm test` ✔ 124/124 · `pnpm build` ✔ |
 | Hand-played by a human | **No.** Tuning comes from headless simulations, a dev autopilot driving the player in the browser, and targeted scripted inputs. |
 | Real phones / iPads | **Not tested.** Only Chromium viewport emulation (740×360 landscape) and synthetic touch events. |
 | Audio | Implemented (WebAudio synthesis) but **never listened to** — the test tooling cannot hear audio. |
@@ -68,6 +69,11 @@ src/
                collisions.ts, hazards.ts (HazardField: obstacles/surfaces/canals ground field),
                dogs.ts, progress.ts (laps/checkpoints/ranking), ai.ts (BotController), race.ts (RaceSession)
   tracks/      barangayDash.ts (geometry + hazard/canal/dog placements)
+  config/ (1.6) items.ts (ITEMS, DASH, LANDING_BONUS, EFFECT_LIMITS), pedestrians.ts (PEDESTRIAN)
+  sim/ (1.6)   effects.ts (timed effects, capped modifiers, item roll, DoubleTapDetector), pickups.ts,
+               pedestrians.ts (crossing state machine)
+  render/ (1.6) items.ts (snack models, parol pickup), villager.ts (one-draw-call skinned villager),
+               pedestrianView.ts, court.ts (basketball court + scripted game)
   render/      stage.ts (renderer/lights/quality), environment.ts (terrain, road, village, canals cover,
                foliage), hazards.ts (hazard + canal meshes), props.ts (buildings/vegetation builders),
                character.ts (Runner model + procedural animation + arm IK), kariling.ts (tyre, stick, scoop),
@@ -85,7 +91,9 @@ src/
 
 **Frame loop:** `RaceController.frame(dt)` accumulates real time and runs `RaceSession.step()` at a fixed 1/60 s (max 8 steps/frame), snapshotting positions before each tick; rendering interpolates tyre and runner positions/headings between snapshots.
 
-**Tick order inside `RaceSession.step`:** countdown → catch-up scaling → per racer: input (bot or human) → `stepRacer` (physics + runner) → stuck check → `resolveRacerCollisions` (all pairs, 2 passes) → per racer: barrier/fence → runner clamp (fences, canal lips) → hazard enter-triggers → safe-position tracking → respawn if requested → lap progress → wrong-way → dogs (+ stuns) → finish check.
+**Tick order inside `RaceSession.step`:** countdown (dogs + pedestrians idle) → catch-up scaling → per racer: input (bot or human) → `stepRacer` (effects tick, item use, dash, physics + runner, landing-bonus window) → stuck check → `resolveRacerCollisions` (all pairs, 2 passes) → per racer: barrier/fence → runner clamp (fences, canal lips) → hazard enter-triggers → pickup collection → safe-position tracking → respawn if requested → lap progress → wrong-way → dogs (+ stuns) → pedestrians (+ bumps) → pickup respawn timers → finish check.
+
+**Milestone 1.6 rendering notes:** the road and decals sit at y ≈ 0.004–0.016 (the sim ground is y = 0). `Runner.ground` (set by `RacerView` from a per-racer sampler in `RaceController`) is used by the leg IK; without it (menus, spectators) the ground is flat at the root. `Runner.footClearance` reports the solved sole heights (tests use it).
 
 **Coordinate conventions:** forward = `(sin h, cos h)` in XZ; increasing heading turns **left**; right vector = `(-cos h, sin h)`. Positive `steer`/`yawRate` = right turn. Track lateral offset `d` > 0 = right of the racing line. three.js models face +z with their right side at −x.
 
@@ -238,6 +246,8 @@ Quality profiles (`render/quality.ts`): Low (pixel ratio 1, no shadows, grass 90
 
 ## 11. Known bugs, quirks and limitations
 
+**Milestone 1.6 notes** — see `PROGRESS.md` "Milestone 1.6 known issues" (draw calls up, foot slip at sprint, villager simplifications, scripted court, approximate scoop clearance, generic snack names).
+
 **Bugs / unexplained**
 1. **Stray dark specks on the start line in the menu background** (seen once in the main-menu orbit, small dark blobs above the checker). Investigation ruled out tread blocks, instanced rocks and raycastable meshes; root cause **not found**. May be particles at the origin (start line is at world 0,0) — check `DustSystem` alpha handling first.
 2. `physics.integrate` re-enters OUT OF CONTROL as `canal` by briefly setting `control = 'controlled'` — works, but a hack; a tumbling tyre that slides into a canal switches lost kind mid-way.
@@ -263,7 +273,7 @@ Quality profiles (`render/quality.ts`): Low (pixel ratio 1, no shadows, grass 90
 
 ## 12. Testing summary
 
-`pnpm test` — 71 tests in 6 files, all passing (2026-11-21):
+`pnpm test` — **124 tests in 11 files** after Milestone 1.6 (new: character, dogs, terrain, items, pedestrians — see `PROGRESS.md`). The table below is the Milestone 1.5 baseline:
 
 | File | Tests | Covers |
 |---|---|---|
@@ -286,7 +296,7 @@ Quality profiles (`render/quality.ts`): Low (pixel ratio 1, no shadows, grass 90
 | Normal | ~2:40–2:55 | 0–3 |
 | Hard | ~2:30–2:40 | 0–4 |
 
-To re-run: create `tests/_scratch/stats.test.ts` that builds `new RaceSession(new Track(BARANGAY_DASH), bots, { laps: 3, difficulty, seed })`, steps until `phase === 'finished'`, and tallies `r.events` flags (`EV_FALL`, `EV_STUN`, `EV_CANAL`, …); write results with `writeFileSync` (console output is swallowed). Run with `npx vitest run tests/_scratch/stats.test.ts` — note the default test include only covers `tests/*.test.ts`, so pass the path explicitly.
+To re-run: `tests/_scratch/` is git-ignored; give it its own config (`tests/_scratch/vitest.config.ts` with `include: ['tests/_scratch/*.test.ts'], root: process.cwd()`) and run `npx vitest run --config tests/_scratch/vitest.config.ts <name>`. Create `tests/_scratch/stats.test.ts` that builds `new RaceSession(new Track(BARANGAY_DASH), bots, { laps: 3, difficulty, seed })`, steps until `phase === 'finished'`, and tallies `r.events` flags (`EV_FALL`, `EV_STUN`, `EV_CANAL`, …); write results with `writeFileSync` (console output is swallowed). Run with `npx vitest run tests/_scratch/stats.test.ts` — note the default test include only covers `tests/*.test.ts`, so pass the path explicitly.
 
 ---
 
@@ -307,7 +317,7 @@ To re-run: create `tests/_scratch/stats.test.ts` that builds `new RaceSession(ne
 
 ## 14. Recommended next steps
 
-1. **Playtest Milestone 1.5 by hand** on desktop and a real phone/iPad (Medium/Low). Use `?debug` to read instability/stress while tuning. Likely tuning knobs: `PHYSICS.stressThresholdHigh`, `cornerStressGain`, `recoveryFastMul`, `unstableEnter/Exit`, hazard `instabilitySpeed`/`kick`, `DOG.chaseSpeed`, `cleanTime`, AI `cornerSafety`.
+1. **Playtest Milestones 1.5 + 1.6 by hand** (new knobs: `src/config/items.ts`, `src/config/pedestrians.ts`, `DOG`, grass in `src/config/surfaces.ts`, `PHYSICS.dirtDuration`/`lumpStressGain`) on desktop and a real phone/iPad (Medium/Low). Use `?debug` to read instability/stress while tuning. Likely tuning knobs: `PHYSICS.stressThresholdHigh`, `cornerStressGain`, `recoveryFastMul`, `unstableEnter/Exit`, hazard `instabilitySpeed`/`kick`, `DOG.chaseSpeed`, `cleanTime`, AI `cornerSafety`.
 2. **Fix the small known issues** in §11 (start-line specks, canal hack, banner lingering, comment) — quick wins.
 3. **Listen to the audio** and adjust levels; consider ducking music on crashes.
 4. **Phase 2** (spec §19): character/tyre/stick customisation screen with live 3D preview (the `RacerLoadout`/`TyreLook` types and the `Runner`/`buildTyre` builders already support all options), then Street Sprint, Farm Run (mud, bridges — hazard system ready) and Cliffside Challenge (needs track elevation: the sim is currently flat apart from hazards; `GroundFn` is the extension point).

@@ -1137,3 +1137,66 @@ This section records how the brief has actually been implemented so far. Where i
 **Architecture now:** Vite + strict TypeScript + three.js; deterministic render-free simulation in `src/sim` (fixed 60 Hz) driven by `src/game/raceController.ts` with interpolated rendering; data-driven configs in `src/config`; procedural geometry, textures and audio (no external assets except the Google font). Designed so `RaceSession` can later run server-side for authoritative multiplayer.
 
 **Not yet built from earlier sections:** customisation screen (§5), tracks 2–4 (§9), Cloudflare backend, identity, D1 leaderboards (§13–14), multiplayer (§11), gamepad support, verified mobile performance (§16).
+
+---
+
+# 26. Milestone 1.6 — Gameplay improvements, fixes and Filipino power-ups (session 3, 2026-11-21)
+
+Owner brief (summarised; the full text was given in the session). Work order: (1) character joints,
+disconnected legs, ground contact, stick alignment; (2) boost arrows, smaller warnings; (3) obstacles,
+yellow humps, dog chase duration; (4) grass physics, two-option dog poo; (5) double-tap dash, ramp
+landing bonus; (6) random Filipino power-ups; (7) civilian pedestrians; (8) basketball court with
+players; (9) test and rebalance; (10) update docs. Do not rebuild; keep architecture; stop for playtest.
+
+## 26.1 Characters and ground contact
+Anatomical shoulder/elbow/hip/knee/ankle joints that stay connected through every animation; elbows
+and knees bend the natural way; the pushing arm follows the stick; no hand/stick/scoop/tyre clipping;
+feet on the terrain (slopes, bumps, elevation) using the real ground, not hard-coded offsets; tyre on
+the road; stick/scoop not through the ground; visuals aligned with the physics state; mobile-friendly.
+
+## 26.2 HUD and boosts
+Boost arrows point in the racing direction (also on curves). Warnings (instability, hazards, dogs,
+boosts, recoveries) become small, translucent, edge-placed notifications with icons and short text,
+fading in/out, not overlapping, never covering the road centre or the touch controls.
+
+## 26.3 Obstacles and dogs
+Flat motorbike tyres taller (collision + model). Yellow humps taller/wider and more visible, with
+bounce, momentum and stability effects, never vertical walls. Dogs chase longer and further: catch
+slow racers, fast ones can escape; navigate the road, not through obstacles; warning cues; no repeated
+unavoidable stuns; same rules for AI.
+
+## 26.4 Terrain and dog poo
+Grass: less acceleration and top speed, more rolling resistance, different traction, instability on
+uneven patches, particles, visible reaction; tyre types differ (MTB best, road worst); no free
+shortcut. Poo: choose to stop at the roadside and clean (quick, full fix) or race on with a moderate
+penalty and stink trail that wears off; never forced to stop; AI decides sensibly.
+
+## 26.5 Skill boosts
+Double-tap push (keyboard, phone, iPad) → short dash: more acceleration, stamina cost, instability,
+less precise steering, cooldown, feedback. Ramp landing bonus only for a real ramp take-off, landing,
+reconnecting the scoop within a short window and no severe crash; once per landing; effect + sound +
+"Nice Catch!".
+
+## 26.6 Power-ups
+Original Filipino pickup objects on the track; random weighted item; one held at a time; HUD slot and
+activation button (touch-friendly); AI collects and uses items; configurable durations, strengths,
+cooldowns; no runaway stacking; compatible with the three control states. Items: Buko — Stability
+Shield; Chippy-style corn chips — Crunch Boost; SkyFlakes-style crackers — Recovery Boost; Pandesal —
+Endurance; Turon — Golden Roll; cola in a tied plastic bag — Sugar Rush (with crash). No logos.
+
+## 26.7 Pedestrians and basketball court
+Villagers (adults and children) in groups near homes/shops and crossing at selected points, aware of
+racers (hesitate, stop, dodge); family-friendly contact (slow/unsettle the racer, cartoon reaction, no
+injuries); never stuck; fair; controlled spawn points; mobile-friendly counts. At least one basketball
+court behind a roadside fence with markings, hoops, fencing, players dribbling/passing/shooting, a
+visible ball and optional bounce sounds; efficient rendering.
+
+## 26.8 Engineering
+Data-driven configs; tests for double-tap, boosts/cooldowns, landing rewards, item selection,
+activation/expiry, poo expiry, terrain modifiers, pedestrian states, collision/ground-contact
+invariants; typecheck, lint, tests, build; browser verification; logical commits.
+
+## 26.9 As built
+See `PROGRESS.md` (Milestone 1.6) and `docs/HANDOVER.md` for design decisions, values and known issues.
+Display names for branded snacks are generic ("Corn Chips", "Crackers", "Cola sa Plastik") to avoid
+trademarks; ids keep the brief's names and can be renamed in `src/config/items.ts`.
