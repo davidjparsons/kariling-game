@@ -2,12 +2,16 @@ import { BOT_ROSTER, type RacerLoadout } from '../config/appearance';
 import { FIXED_DT, RACE } from '../config/gameplay';
 import { SURFACES } from '../config/surfaces';
 import { AI_PROFILES, BotController, type Difficulty } from '../sim/ai';
-import { EV_BUMP, EV_FALL, EV_RECOVERED, EV_TAP, type RacerInput } from '../sim/physics';
+import {
+  EV_BOOST, EV_BUMP, EV_CANAL, EV_CATCH, EV_CLEAN_START, EV_CLEANED, EV_FALL, EV_LAND, EV_LAUNCH, EV_POO,
+  EV_RECOVERED, EV_RESPAWN, EV_SEPARATE, EV_STUN, EV_TAP, EV_UNSTABLE, type RacerInput,
+} from '../sim/physics';
 import { populateGrid, RaceSession, type RaceRacer, type RacerSetup } from '../sim/race';
 import type { Track } from '../sim/track';
 import type { AudioEngine } from '../audio/audio';
 import type { InputManager } from '../input/input';
 import type { ChaseCamera } from '../render/camera';
+import { DogView } from '../render/dogView';
 import type { DustSystem } from '../render/effects';
 import type { EnvironmentBuild } from '../render/environment';
 import { RacerView } from '../render/racerView';
@@ -21,6 +25,7 @@ export interface RaceConfig {
   player: { id: string; name: string; loadout: RacerLoadout };
   showTouch: boolean;
   seed: number;
+  debugHud: boolean;
 }
 
 export interface RaceResultRow {
@@ -31,7 +36,7 @@ export interface RaceResultRow {
   position: number;
   time: number | null;
   bestLap: number | null;
-  /** Estimated finish (bot didn't finish within the fast-forward window). */
+  /** Bot didn't finish within the fast-forward window. */
   dnf: boolean;
 }
 
@@ -45,7 +50,9 @@ export interface RaceDeps {
   uiRoot: HTMLElement;
 }
 
-type Snapshot = { x: number; z: number; heading: number };
+type Snapshot = { x: number; z: number; heading: number; rx: number; rz: number; rHeading: number };
+
+const lerpAngle = (a: number, b: number, t: number) => a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) * t;
 
 /**
  * Runs one race: fixed-timestep simulation, interpolated rendering, HUD, audio and effects.
@@ -53,6 +60,7 @@ type Snapshot = { x: number; z: number; heading: number };
 export class RaceController {
   readonly session: RaceSession;
   readonly views: RacerView[] = [];
+  readonly dogViews: DogView[] = [];
   readonly hud: Hud;
   private prev: Snapshot[] = [];
   private acc = 0;
@@ -66,6 +74,7 @@ export class RaceController {
   private footTimer = 0;
   private time = 0;
   private lastLapShown = 0;
+  private shake = 0;
   onFinish: ((rows: RaceResultRow[]) => void) | null = null;
   /** Dev/testing only: let an AI drive the player's racer. */
   devAutopilot: BotController | null = null;
@@ -73,11 +82,11 @@ export class RaceController {
   constructor(private cfg: RaceConfig, private deps: RaceDeps) {
     const humans: RacerSetup[] = [{
       id: cfg.player.id, name: cfg.player.name, isBot: false,
-      tyreId: cfg.player.loadout.tyreId, stickId: cfg.player.loadout.stickId,
+      tyreId: cfg.player.loadout.tyreId, stickId: cfg.player.loadout.stickId, age: cfg.player.loadout.appearance.age,
     }];
     const roster = BOT_ROSTER;
     const bots: RacerSetup[] = roster.map((b, i) => ({
-      id: `bot-${i}`, name: b.name, isBot: true, tyreId: b.loadout.tyreId, stickId: b.loadout.stickId,
+      id: `bot-${i}`, name: b.name, isBot: true, tyreId: b.loadout.tyreId, stickId: b.loadout.stickId, age: b.loadout.appearance.age,
     }));
     // Player starts at the back of the grid: more fun to overtake.
     const grid = populateGrid(humans, bots);
@@ -93,8 +102,14 @@ export class RaceController {
       deps.stage.scene.add(view.group);
       this.views.push(view);
     }
+    for (const d of this.session.dogs) {
+      const dv = new DogView(d.id);
+      deps.stage.scene.add(dv.root);
+      this.dogViews.push(dv);
+    }
     this.snapshot();
     this.hud = new Hud(deps.uiRoot, cfg.track, this.session.racers.map((r) => (r.setup.id === this.playerId ? '' : r.setup.name)), cfg.showTouch);
+    this.hud.setDebug(cfg.debugHud);
     deps.input.bindTouch(this.hud.root);
     const p = this.player;
     deps.camera.snap(this.cameraTarget(p.phys.x, p.phys.z, p.phys.heading, 0), deps.env.terrain);
@@ -115,13 +130,19 @@ export class RaceController {
     this.deps.input.clear();
   }
 
+  setDebug(on: boolean): void {
+    this.hud.setDebug(on);
+  }
+
   respawnPlayer(): void {
-    this.session.respawn(this.player);
+    this.session.respawn(this.player, false);
     this.snapshot();
   }
 
   private snapshot(): void {
-    this.prev = this.session.racers.map((r) => ({ x: r.phys.x, z: r.phys.z, heading: r.phys.heading }));
+    this.prev = this.session.racers.map((r) => ({
+      x: r.phys.x, z: r.phys.z, heading: r.phys.heading, rx: r.phys.rx, rz: r.phys.rz, rHeading: r.phys.rHeading,
+    }));
   }
 
   private cameraTarget(x: number, z: number, heading: number, speed: number) {
@@ -158,7 +179,6 @@ export class RaceController {
     const wasCountdown = s.phase === 'countdown';
     s.step(inputs);
 
-    // Countdown beeps.
     if (wasCountdown) {
       const n = Math.ceil(s.countdown);
       if (n !== this.lastCountdown) {
@@ -168,20 +188,8 @@ export class RaceController {
       if (s.phase === 'racing') { this.hud.message('GO!', 1, 'go'); this.deps.audio.countdown(0); }
     }
 
-    // Events → audio/effects (player is loud, others quieter).
-    for (const r of s.racers) {
-      const me = r.setup.id === this.playerId;
-      const near = me || Math.hypot(r.phys.x - p.phys.x, r.phys.z - p.phys.z) < 18;
-      if (r.events & EV_TAP && me) this.deps.audio.tap(0.8);
-      if (r.events & EV_FALL) {
-        if (near) this.deps.audio.fall();
-        this.burstDust(r, 14);
-      }
-      if (r.events & EV_RECOVERED && me) this.deps.audio.recover();
-      if (r.events & EV_BUMP && near && r.bumpImpact > 1) this.deps.audio.bump(r.bumpImpact);
-    }
+    this.handleEvents();
 
-    // Lap messages.
     const laps = p.progress.lapsCompleted;
     if (laps > this.lastLapShown && !p.progress.finished) {
       this.lastLapShown = laps;
@@ -196,6 +204,81 @@ export class RaceController {
       this.deps.audio.finish(pos === 1);
     }
     if (this.finishedAt !== null && this.time - this.finishedAt > RACE.finishCelebration && !this.done) this.complete();
+  }
+
+  /** Simulation events → sounds, particles, speech bubbles and HUD messages. */
+  private handleEvents(): void {
+    const s = this.session;
+    const p = this.player;
+    const a = this.deps.audio;
+    s.racers.forEach((r, i) => {
+      const me = r.setup.id === this.playerId;
+      const near = me || Math.hypot(r.phys.x - p.phys.x, r.phys.z - p.phys.z) < 18;
+      const view = this.views[i];
+      const e = r.events;
+      if (e & EV_TAP && me) a.tap(0.8);
+      if (e & EV_FALL) {
+        if (near) a.fall();
+        this.burstDust(r, 16);
+        view.react(r.phys.lostKind === 'impact' ? 'ARAY!' : 'AY!', null, 1.0, '#ffe082');
+        if (me) { this.hud.message('OUT OF CONTROL!', 1.4, 'final'); this.shake = 0.35; }
+      }
+      if (e & EV_CANAL) {
+        if (near) a.splash();
+        this.burstSplash(r.phys.x, -0.6, r.phys.z, 0x7fa2a8, 22);
+        view.react('AY NAKU!', null, 1.4, '#ffe082');
+        if (me) this.hud.message('IN THE CANAL!', 1.6, 'final');
+      }
+      if (e & EV_RECOVERED && me) a.recover();
+      if (e & EV_UNSTABLE && me) a.wobbleWarn();
+      if (e & EV_LAUNCH && near) a.whoosh(Math.min(1, r.phys.vy / 3 + 0.3));
+      if (e & EV_LAND) {
+        if (near) a.land(Math.min(1, r.phys.impact + 0.3));
+        this.burstDust(r, 6);
+        if (me && r.phys.impact > 0.25) this.shake = Math.max(this.shake, 0.2);
+      }
+      if (e & EV_SEPARATE && me && r.phys.control !== 'lost') this.hud.notice('Catch up with your tyre!', 1.2);
+      if (e & EV_CATCH && me) a.catchTyre();
+      if (e & EV_BOOST) {
+        if (near) a.boost();
+        if (me) this.hud.message('BOOST!', 0.9, 'go');
+      }
+      if (e & EV_POO) {
+        view.react('EWW!', 'eww', 1.2, '#c5e1a5');
+        if (near) a.squish();
+        if (me) this.hud.notice('Dirty tyre! Slow right down to clean it', 2.5);
+      }
+      if (e & EV_CLEAN_START) view.react('Linis!', null, 0.9);
+      if (e & EV_CLEANED) { if (me) { a.clean(); this.hud.notice('Clean! Go go go!', 1); } this.sparkle(r, 0xffffff, 10); }
+      if (e & EV_STUN) {
+        if (near) a.stun();
+        view.react('ARAY!', null, 1.1, '#ffccbc');
+        if (me) { this.hud.message('BITTEN!', 1, 'final'); this.shake = 0.3; }
+      }
+      if (e & EV_RESPAWN) this.sparkle(r, 0xffffff, 14);
+      if (e & EV_BUMP && near && r.bumpImpact > 1) a.bump(r.bumpImpact);
+      for (const h of r.hazardHits) {
+        if (!near) continue;
+        if (h.type === 'pothole' || h.type === 'flatTyre') a.clunk();
+        if (h.type === 'log') a.thunk();
+        if (h.type === 'mud') this.burstSplash(r.phys.x, 0.1, r.phys.z, 0x5a3d22, 10);
+      }
+    });
+    for (const ev of s.dogEvents) {
+      const dv = this.dogViews[ev.dog];
+      const dog = s.dogs[ev.dog];
+      const close = Math.hypot(dog.x - p.phys.x, dog.z - p.phys.z) < 25;
+      if (ev.type === 'bark') {
+        dv.say('ARF! ARF!', 1.0, '#fff59d');
+        if (close) a.bark();
+        if (ev.racer === s.racers.indexOf(p)) this.hud.notice('Askal! Outrun it!', 1.5);
+      } else if (ev.type === 'catch') {
+        dv.say('GRRR!', 0.8);
+        if (close) a.bark();
+      } else if (ev.type === 'giveUp') {
+        dv.say('...', 0.6);
+      }
+    }
   }
 
   /** Let the remaining bots finish quickly in pure simulation, then report results. */
@@ -230,8 +313,25 @@ export class RaceController {
   private burstDust(r: RaceRacer, n: number): void {
     const col = SURFACES[r.phys.surface].dustColor;
     for (let i = 0; i < n; i++) {
-      this.deps.dust.emit(r.phys.x, 0.2, r.phys.z, (Math.random() - 0.5) * 3, Math.random() * 1.5, (Math.random() - 0.5) * 3, col, 1.2);
+      this.deps.dust.emit(r.phys.x, r.phys.y + 0.2, r.phys.z, (Math.random() - 0.5) * 3, Math.random() * 1.5, (Math.random() - 0.5) * 3, col, 1.2);
     }
+  }
+
+  private burstSplash(x: number, y: number, z: number, color: number, n: number): void {
+    for (let i = 0; i < n; i++) {
+      this.deps.dust.emit(x, y, z, (Math.random() - 0.5) * 2.5, 1.5 + Math.random() * 2, (Math.random() - 0.5) * 2.5, color, 0.7);
+    }
+  }
+
+  private sparkle(r: RaceRacer, color: number, n: number): void {
+    for (let i = 0; i < n; i++) {
+      this.deps.dust.emit(r.phys.x, r.phys.y + 0.5, r.phys.z, (Math.random() - 0.5) * 1.5, 1 + Math.random(), (Math.random() - 0.5) * 1.5, color, 0.6);
+    }
+  }
+
+  private groundAt(x: number, z: number, hint: number, allowCanal: boolean): number {
+    const g = this.session.groundAt(this.cfg.track.project(x, z, hint));
+    return g.canal && !allowCanal ? 0 : g.h;
   }
 
   private renderViews(dt: number, alpha: number): void {
@@ -241,34 +341,57 @@ export class RaceController {
       const a = this.prev[i];
       const x = a.x + (r.phys.x - a.x) * alpha;
       const z = a.z + (r.phys.z - a.z) * alpha;
-      const dh = Math.atan2(Math.sin(r.phys.heading - a.heading), Math.cos(r.phys.heading - a.heading));
-      const heading = a.heading + dh * alpha;
+      const heading = lerpAngle(a.heading, r.phys.heading, alpha);
+      const rx = a.rx + (r.phys.rx - a.rx) * alpha;
+      const rz = a.rz + (r.phys.rz - a.rz) * alpha;
+      const rHeading = lerpAngle(a.rHeading, r.phys.rHeading, alpha);
       const view = this.views[i];
-      view.update(dt, { x, z, heading, phys: r.phys });
-      tagPos.push({ x, y: view.runner.height + 0.45, z, visible: r.setup.id !== this.playerId });
-      // Dust from tyre + feet.
-      if (dt > 0 && r.phys.speed > 2) {
-        const surf = SURFACES[r.phys.surface];
-        const rate = surf.dust * (r.phys.speed / 12) * (1 + r.phys.slip * 2) * 22;
+      const tyreGround = this.groundAt(x, z, r.hint, true);
+      const runnerGround = Math.max(0, this.groundAt(rx, rz, r.hint, false));
+      view.update(dt, { x, z, heading, rx, rz, rHeading, phys: r.phys, tyreGround, runnerGround });
+      tagPos.push({ x: rx, y: runnerGround + view.runner.height + 0.45, z: rz, visible: r.setup.id !== this.playerId });
+      if (dt <= 0) return;
+      const ph = r.phys;
+      // Dust from the tyre on dusty ground; mud splashes; boost sparkles.
+      if (ph.speed > 2 && ph.grounded) {
+        const surf = SURFACES[ph.surface];
+        const rate = surf.dust * (ph.speed / 12) * (1 + ph.slip * 2) * 22;
         if (Math.random() < rate * dt) {
-          const back = -0.3;
-          this.deps.dust.emit(
-            x + Math.sin(heading) * back + (Math.random() - 0.5) * 0.3, 0.1, z + Math.cos(heading) * back + (Math.random() - 0.5) * 0.3,
-            (Math.random() - 0.5) * 0.8, 0.4 + Math.random() * 0.5, (Math.random() - 0.5) * 0.8, surf.dustColor, 0.8 + Math.random() * 0.5,
-          );
+          this.deps.dust.emit(x - Math.sin(heading) * 0.3 + (Math.random() - 0.5) * 0.3, ph.y + 0.1, z - Math.cos(heading) * 0.3 + (Math.random() - 0.5) * 0.3,
+            (Math.random() - 0.5) * 0.8, 0.4 + Math.random() * 0.5, (Math.random() - 0.5) * 0.8, surf.dustColor, 0.8 + Math.random() * 0.5);
         }
+        if (ph.surface === 'mud' && Math.random() < ph.speed * 1.5 * dt) {
+          this.burstSplash(x, 0.1, z, 0x4e3420, 2);
+        }
+      }
+      if (ph.boost > 0 && Math.random() < 30 * dt) {
+        this.deps.dust.emit(x, ph.y + 0.35, z, (Math.random() - 0.5) * 0.6, 0.6, (Math.random() - 0.5) * 0.6, 0xffc400, 0.45);
       }
     });
     if (dt > 0) this.deps.dust.update(dt);
 
+    s.dogs.forEach((d, i) => this.dogViews[i].update(dt, d, Math.max(0, this.groundAt(d.x, d.z, -1, false))));
+
     const p = this.player;
     const pi = s.racers.indexOf(p);
     const a = this.prev[pi];
-    const px = a.x + (p.phys.x - a.x) * alpha, pz = a.z + (p.phys.z - a.z) * alpha;
+    let px = a.x + (p.phys.x - a.x) * alpha, pz = a.z + (p.phys.z - a.z) * alpha;
+    let heading = p.phys.heading;
+    if (p.phys.control === 'lost') {
+      // Frame the runner chasing the loose tyre.
+      px = (px + p.phys.rx) / 2; pz = (pz + p.phys.rz) / 2;
+      heading = p.phys.rHeading;
+    }
     if (this.done) {
-      this.deps.camera.orbit(this.time, px, pz, 5.5, 2.4, 0.8);
+      this.deps.camera.orbit(this.time, p.phys.rx, p.phys.rz, 5, 2.2, 0.8);
     } else if (dt > 0) {
-      this.deps.camera.update(dt, this.cameraTarget(px, pz, p.phys.heading, p.phys.speed), this.deps.env.terrain, this.deps.env.colliders);
+      this.deps.camera.update(dt, this.cameraTarget(px, pz, heading, p.phys.speed), this.deps.env.terrain, this.deps.env.colliders);
+      if (this.shake > 0) {
+        this.shake = Math.max(0, this.shake - dt);
+        const k = this.shake * 0.12;
+        this.deps.camera.camera.position.x += (Math.random() - 0.5) * k;
+        this.deps.camera.camera.position.y += (Math.random() - 0.5) * k;
+      }
     }
     this.deps.stage.followSun(px, pz);
     this.hud.updateTags(tagPos, this.deps.camera.camera);
@@ -277,6 +400,7 @@ export class RaceController {
   private updateHud(dt: number): void {
     const s = this.session;
     const p = this.player;
+    const ph = p.phys;
     const pr = p.progress;
     const lap = pr.started ? pr.lapsCompleted + 1 : 1;
     const wrongWay = p.wrongWayTime > 1 && !pr.finished;
@@ -287,27 +411,27 @@ export class RaceController {
       lapTime: pr.finished ? (pr.lapTimes[pr.lapTimes.length - 1] ?? 0) : s.time - pr.lapStartTime,
       totalTime: pr.finishTime ?? s.time,
       bestLap: pr.bestLap,
-      speed: p.phys.speed,
-      stamina: p.phys.stamina,
-      instability: p.phys.instability,
+      speed: ph.speed,
+      stamina: ph.stamina,
+      instability: Math.min(1, ph.instability),
       wrongWay,
-      fallen: p.phys.control === 'lost',
+      phys: ph,
     });
     this.hud.tick(dt);
     this.hud.drawMinimap(s.racers, this.playerId);
     const a = this.deps.audio;
-    a.updateRolling(p.phys.speed, p.phys.surface, p.phys.wobble, !this.paused && !this.done);
+    a.updateRolling(ph.grounded ? ph.speed : 0, ph.surface, ph.control === 'lost' ? 0 : ph.wobble, !this.paused && !this.done);
     if (!this.paused && !this.done) {
       if (wrongWay) {
         this.wrongWaySound -= dt;
         if (this.wrongWaySound <= 0) { a.wrongWay(); this.wrongWaySound = 1.2; }
       }
-      if (p.phys.speed > 1 && p.phys.control !== 'lost' && p.phys.grounded) {
+      if (ph.rSpeed > 1) {
         this.footTimer -= dt;
         if (this.footTimer <= 0) {
-          a.footstep(p.phys.surface);
-          const stride = 0.6 + p.phys.speed * 0.12;
-          this.footTimer = stride / p.phys.speed;
+          a.footstep(ph.surface);
+          const stride = 0.6 + ph.rSpeed * 0.12;
+          this.footTimer = stride / ph.rSpeed;
         }
       }
     }
@@ -318,8 +442,11 @@ export class RaceController {
       this.deps.stage.scene.remove(v.group);
       v.dispose();
     }
+    for (const d of this.dogViews) {
+      this.deps.stage.scene.remove(d.root);
+      d.dispose();
+    }
     this.hud.dispose();
     this.deps.audio.updateRolling(0, 'dirt', 0, false);
   }
 }
-

@@ -56,6 +56,30 @@ describe('hazard field', () => {
     expect(f.sample({ s: 0.3 * track.length, d: 4, index: 0, halfWidth: 4.5 }).surface).toBeNull();
   });
 
+  it('canals on both sides at once are both solid', () => {
+    const track = testTrack([], { canals: [{ from: 0.05, to: 0.2, side: 1 }, { from: 0.1, to: 0.3, side: -1 }] });
+    const f = new HazardField(track, [], track.def.canals);
+    const s = 0.15 * track.length;
+    expect(f.sample({ s, d: 5.3, index: 0, halfWidth: 4.5 }).canal).toBe(true);
+    expect(f.sample({ s, d: -5.3, index: 0, halfWidth: 4.5 }).canal).toBe(true);
+  });
+
+  it('a fast diagonal run at the edge falls in instead of jumping the canal', () => {
+    const track = testTrack([], { canals: [{ from: 0.02, to: 0.4, side: 1 }] });
+    const s = new RaceSession(track, [me('road')], { laps: 1, difficulty: 'normal', seed: 1 });
+    startRace(s);
+    const r = s.get('me')!;
+    drive(s, 5);
+    let maxD = 0, events = 0;
+    for (let i = 0; i < 4 / FIXED_DT && r.respawns === 0; i++) {
+      s.step({ me: { steer: 0.5, push: 1, brake: 0, balance: false } });
+      events |= r.events;
+      maxD = Math.max(maxD, r.lastD);
+    }
+    expect(events & EV_CANAL).toBeTruthy();
+    expect(maxD).toBeLessThan(4.5 + 0.3 + 1.1 + 0.2); // never beyond the far wall
+  });
+
   it('canals are recessed only beyond the road edge on their side', () => {
     const track = testTrack([], { canals: [{ from: 0.05, to: 0.2, side: 1 }] });
     const f = new HazardField(track, [], track.def.canals);

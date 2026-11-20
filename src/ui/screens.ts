@@ -138,9 +138,10 @@ export function settingsScreen(s: Settings): string {
       <div class="field">Camera ${seg('camera', s.camera, [['near', 'Near'], ['normal', 'Normal'], ['far', 'Far']])}</div>
       <div class="field">Touch controls ${seg('touchControls', s.touchControls, [['auto', 'Auto'], ['on', 'On'], ['off', 'Off']])}</div>
       <div class="field">Auto-push ${seg('autoPush', String(s.autoPush), [['false', 'Off'], ['true', 'On']])}</div>
+      <div class="field">Debug HUD ${seg('debugHud', String(s.debugHud), [['false', 'Off'], ['true', 'On']])}</div>
       <label class="field">Sound effects <input type="range" min="0" max="1" step="0.05" value="${s.sfxVolume}" data-range="sfxVolume"/></label>
       <label class="field">Music <input type="range" min="0" max="1" step="0.05" value="${s.musicVolume}" data-range="musicVolume"/></label>
-      <p class="note">Auto-push keeps the runner pushing so younger players only need to steer.</p>
+      <p class="note">Auto-push keeps the runner pushing so younger players only need to steer. Debug HUD (or F3) shows tyre speed, instability, control state, ground and stick contact.</p>
       <button class="btn big yellow" data-action="back">Done</button>
     </div>
   </div>`;

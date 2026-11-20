@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { formatTime, ordinal } from '../core/math';
+import type { RacerPhysicsState } from '../sim/physics';
 import type { RaceRacer } from '../sim/race';
 import type { Track } from '../sim/track';
 
@@ -15,7 +16,7 @@ export interface HudState {
   stamina: number;
   instability: number;
   wrongWay: boolean;
-  fallen: boolean;
+  phys: RacerPhysicsState;
 }
 
 const RACER_COLORS = ['#ff9800', '#ff4f8b', '#ffd600', '#3ddc84', '#7c4dff'];
@@ -28,6 +29,9 @@ export class Hud {
   private miniBase: HTMLCanvasElement;
   private miniXf: (x: number, z: number) => [number, number];
   private msgTimer = 0;
+  private noticeTimer = 0;
+  private debugOn = false;
+  private debugTick = 0;
   private tags: HTMLElement[] = [];
   private v = new THREE.Vector3();
 
@@ -43,6 +47,8 @@ export class Hud {
           <div><span>TOTAL</span><b data-k="total">0:00.000</b></div>
           <div class="dim"><span>BEST</span><b data-k="best">--:--.---</b></div>
         </div>
+        <div class="hud-state" data-k="state"></div>
+        <pre class="hud-debug hidden" data-k="debug"></pre>
       </div>
       <div class="hud-tr">
         <canvas class="minimap" width="200" height="200"></canvas>
@@ -53,7 +59,7 @@ export class Hud {
         <div class="meter"><label>STAMINA</label><div class="bar"><i data-k="stam"></i></div></div>
         <div class="meter"><label>BALANCE</label><div class="bar balance"><i data-k="bal"></i></div></div>
       </div>
-      <div class="hud-center"><div class="hud-msg" data-k="msg"></div><div class="hud-warn" data-k="warn"></div></div>
+      <div class="hud-center"><div class="hud-msg" data-k="msg"></div><div class="hud-warn" data-k="warn"></div><div class="hud-notice" data-k="notice"></div></div>
       <div class="hud-tags"></div>
       <div class="touch ${showTouch ? '' : 'hidden'}">
         <div class="touch-left">
@@ -121,12 +127,33 @@ export class Hud {
     const bal = 1 - s.instability;
     e.bal.style.width = `${Math.round(bal * 100)}%`;
     e.bal.parentElement!.classList.toggle('low', s.instability > 0.6);
+    const p = s.phys;
     let warn = '';
     if (s.wrongWay) warn = 'WRONG WAY!';
-    else if (s.fallen) warn = 'WHOOPS!';
-    else if (s.instability > 0.62) warn = 'WOBBLE! Ease off';
+    else if (p.control === 'lost') warn = p.lostPhase === 'canal' ? 'Splash!' : p.lostPhase === 'pickup' ? 'Picking it up…' : 'Catch your tyre!';
+    else if (p.stun > 0) warn = 'Dizzy!';
+    else if (p.cleaning > 0) warn = 'Cleaning the tyre…';
+    else if (p.control === 'unstable') warn = 'WOBBLE! Ease off & straighten';
     e.warn.textContent = warn;
     e.warn.classList.toggle('show', warn !== '');
+    e.warn.classList.toggle('calm', p.cleaning > 0);
+    // Control-state chip: green / amber / red.
+    const st = p.control === 'lost' ? 'OUT OF CONTROL' : p.control === 'unstable' ? 'UNSTABLE' : 'CONTROLLED';
+    e.state.textContent = st + (p.boost > 0 ? ' · BOOST' : '') + (p.dirt > 0.05 ? ' · DIRTY' : '') + (p.invuln > 0 ? ' · SAFE' : '');
+    e.state.dataset.state = p.control;
+    if (this.debugOn && (this.debugTick++ % 6 === 0)) {
+      const f = (n: number, d = 2) => n.toFixed(d);
+      e.debug.textContent =
+        `speed   ${f(p.speed)} m/s (${Math.round(p.speed * 3.6)} km/h)\n` +
+        `state   ${p.control}${p.control === 'lost' ? ` / ${p.lostKind} / ${p.lostPhase}` : ''}  t=${f(p.controlTime, 1)}\n` +
+        `instab  ${f(p.instability)}  wobble ${f(p.wobble)}  lean ${f(p.lean)}\n` +
+        `stress  corner ${f(p.stressCorner)} jerk ${f(p.stressJerk)} rough ${f(p.stressRough)}\n` +
+        `load    ${f(p.load)}  slip ${f(p.slip)}  surface ${p.surface}\n` +
+        `ground  ${p.grounded ? 'yes' : 'AIR'}  y ${f(p.y)} vy ${f(p.vy)} air ${f(p.airTime)}\n` +
+        `stick   contact ${f(p.stickContact)}  ${p.separated ? 'SEPARATED ' + f(p.separatedTime, 1) : 'attached'}\n` +
+        `fx      boost ${f(p.boost, 1)} stun ${f(p.stun, 1)} safe ${f(p.invuln, 1)} dirt ${f(p.dirt)} clean ${f(p.cleaning, 1)}\n` +
+        `stamina ${f(p.stamina)}`;
+    }
   }
 
   message(text: string, seconds = 1.4, cls = ''): void {
@@ -136,7 +163,24 @@ export class Hud {
     this.msgTimer = seconds;
   }
 
+  /** Short helper line under the main message (tips, hazard warnings). */
+  notice(text: string, seconds = 1.5): void {
+    const n = this.el.notice;
+    n.textContent = text;
+    n.classList.add('show');
+    this.noticeTimer = seconds;
+  }
+
+  setDebug(on: boolean): void {
+    this.debugOn = on;
+    this.el.debug.classList.toggle('hidden', !on);
+  }
+
   tick(dt: number): void {
+    if (this.noticeTimer > 0) {
+      this.noticeTimer -= dt;
+      if (this.noticeTimer <= 0) this.el.notice.classList.remove('show');
+    }
     if (this.msgTimer > 0) {
       this.msgTimer -= dt;
       if (this.msgTimer <= 0) this.el.msg.classList.remove('show');

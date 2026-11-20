@@ -12,6 +12,7 @@ export class InputManager {
   autoPush = false;
   onPause: (() => void) | null = null;
   onCamera: (() => void) | null = null;
+  onDebug: (() => void) | null = null;
   private disposers: (() => void)[] = [];
 
   constructor() {
@@ -21,6 +22,7 @@ export class InputManager {
       if (!e.repeat) {
         if (e.code === 'Escape' || e.code === 'KeyP') this.onPause?.();
         if (e.code === 'KeyC') this.onCamera?.();
+        if (e.code === 'F3' || e.code === 'Backquote') { e.preventDefault(); this.onDebug?.(); }
       }
       this.keys.add(e.code);
     };

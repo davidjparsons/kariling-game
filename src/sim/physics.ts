@@ -470,12 +470,23 @@ function integrate(st: RacerPhysicsState, ctx: PhysicsContext, ground: GroundFn,
   let events = 0;
   const fx = Math.sin(st.heading), fz = Math.cos(st.heading);
   const rx = -fz, rz = fx; // right vector
+  const px = st.x, pz = st.z;
   st.x += (fx * st.speed + rx * st.latVel) * dt;
   st.z += (fz * st.speed + rz * st.latVel) * dt;
   st.roll += (st.speed / ctx.tyre.radius) * dt;
 
   const G = PHYSICS.airGravity;
-  const g1 = ground(st.x, st.z);
+  const g0 = ground(px, pz);
+  let g1 = ground(st.x, st.z);
+  // Walls: a tyre below a sudden step (canal sides, the end of a trench) can't pass through it.
+  const wall = !st.grounded ? g1.h > st.y + PHYSICS.wallStep : g0.canal && !g1.canal && g1.h > st.y + PHYSICS.wallStep;
+  if (wall) {
+    st.x = px; st.z = pz;
+    st.speed *= 0.3;
+    st.latVel = -st.latVel * 0.2;
+    g1 = ground(st.x, st.z);
+    events |= EV_BUMP;
+  }
   if (st.grounded) {
     const dh = g1.h - st.y;
     if (dh >= 0) {

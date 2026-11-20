@@ -124,12 +124,12 @@ export class BotController {
         limitFromHazards = Math.min(limitFromHazards, Math.sqrt(safe * safe + 2 * 5.5 * Math.max(0, dist - 1)));
       }
     }
-    const canalSide = field.canalSideAt(s + 10) || field.canalSideAt(s);
+    const canalNear = (side: number) => field.hasCanal(s, side) || field.hasCanal(s + 10, side);
     let best = desired, bestCost = Infinity;
     for (let c = -hw + 0.9; c <= hw - 0.9; c += 0.25) {
       let cost = Math.abs(c - desired);
       for (const [a, b] of blocks) if (c > a && c < b) cost += 50;
-      if (canalSide !== 0 && Math.sign(c) === canalSide && Math.abs(c) > hw - 1.6) cost += 8;
+      if (Math.abs(c) > hw - 1.6 && canalNear(Math.sign(c))) cost += 8;
       if (cost < bestCost) { bestCost = cost; best = c; }
     }
     // If every lane is blocked, slow right down instead.
@@ -182,6 +182,9 @@ export class BotController {
     if (p.stamina < prof.staminaReserve) this.resting = true;
     if (p.stamina > prof.staminaReserve + 0.25) this.resting = false;
     if (this.resting && p.speed > vTop * 0.7) push = Math.min(push, 0.15);
+    // A dog on our heels: sprint, don't coast.
+    const me = session.racers.indexOf(self);
+    if (session.dogs.some((d) => (d.state === 'chase' || d.state === 'alert') && d.target === me) && p.speed <= allowed) push = Math.max(push, prof.pushCap);
 
     // --- Balance ---
     let balance = false;

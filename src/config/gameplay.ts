@@ -87,6 +87,8 @@ export const PHYSICS = {
   bounceRestitution: 0.28,
   /** Steering authority while airborne. */
   airSteer: 0.1,
+  /** A step this much higher than an airborne tyre acts as a wall (m). */
+  wallStep: 0.15,
   /** Energy lost (fraction of speed per metre climbed). */
   climbSpeedLoss: 0.35,
 

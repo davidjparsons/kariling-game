@@ -327,11 +327,12 @@ export class RaceSession {
     return this.track.project(p.x, p.z, proj.index);
   }
 
-  /** Keep runners inside the fences too. */
+  /** Keep runners inside the fences, and out of canals (they stop at the lip). */
   private clampRunner(r: RaceRacer): void {
     const p = r.phys;
     const proj = this.track.project(p.rx, p.rz, r.hint);
-    const limit = this.track.barrierOffset(proj) - 0.3;
+    const lip = this.field.canalEdges(proj.halfWidth).inner - 0.15;
+    const limit = this.field.hasCanal(proj.s, Math.sign(proj.d)) ? lip : this.track.barrierOffset(proj) - 0.3;
     if (Math.abs(proj.d) <= limit) return;
     const pt = this.track.pointAt(proj.s);
     const over = Math.abs(proj.d) - limit;

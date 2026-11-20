@@ -11,6 +11,9 @@ import {
 } from './props';
 import type { QualityProfile } from './quality';
 import { checkerTexture, paddyTexture, signTexture, skyTexture, speckleTexture } from './textures';
+import { CANAL } from '../config/hazards';
+import type { HazardField } from '../sim/hazards';
+import { buildHazards } from './hazards';
 
 const ROAD_COLORS: Record<SurfaceId, THREE.Color> = {
   paved: new THREE.Color(0xd2cdc2),
@@ -80,7 +83,15 @@ export interface EnvironmentBuild {
   dispose(): void;
 }
 
-export function buildEnvironment(track: Track, q: QualityProfile, seed = 1): EnvironmentBuild {
+export function buildEnvironment(track: Track, q: QualityProfile, seed = 1, field?: HazardField): EnvironmentBuild {
+  /** Is (x, z) in or right beside a canal trench? */
+  const inCanalZone = (x: number, z: number, extra: number): boolean => {
+    if (!field || field.canals.length === 0) return false;
+    const pj = track.project(x, z);
+    if (!field.hasCanal(pj.s, Math.sign(pj.d))) return false;
+    const { outer } = field.canalEdges(pj.halfWidth);
+    return Math.abs(pj.d) > pj.halfWidth - 0.6 && Math.abs(pj.d) < outer + extra;
+  };
   const group = new THREE.Group();
   const rng = new Rng(seed);
   const terrain = new Terrain(track);
@@ -134,7 +145,9 @@ export function buildEnvironment(track: Track, q: QualityProfile, seed = 1): Env
   for (let i = 0; i < tpos.count; i++) {
     const x = tpos.getX(i), z = tpos.getZ(i);
     const dist = terrain.distToTrack(x, z);
-    const h = terrain.heightAt(x, z, dist);
+    let h = terrain.heightAt(x, z, dist);
+    // Sink the terrain under canal trenches (the canal mesh and cover strips sit on top).
+    if (dist < 16 && inCanalZone(x, z, 2.5)) h = -CANAL.depth - 0.35;
     tpos.setY(i, h);
     const n = fbm(x * 0.04, z * 0.04);
     c.copy(grassA).lerp(grassB, smoothstep(0.35, 0.7, n)).lerp(grassC, smoothstep(0.6, 0.9, fbm(x * 0.11 + 9, z * 0.11)) * 0.6);
@@ -174,6 +187,10 @@ export function buildEnvironment(track: Track, q: QualityProfile, seed = 1): Env
       const rc = smoothCol(i % n);
       const offs = [-hw - 1.3, -hw + 0.5, -hw * 0.35, hw * 0.35, hw - 0.5, hw + 1.3];
       const alphas = [0, 1, 1, 1, 1, 0];
+      // Hard concrete edge where a canal runs alongside.
+      const sAt = (i % n) * track.spacing;
+      if (field?.hasCanal(sAt, -1)) { offs[0] = -hw - 0.05; alphas[0] = 1; }
+      if (field?.hasCanal(sAt, 1)) { offs[5] = hw + 0.05; alphas[5] = 1; }
       const shades = [0.92, 0.95, 1.03, 1.03, 0.95, 0.92];
       for (let k = 0; k < cols; k++) {
         pos.push(smp.x + smp.nx * offs[k], 0.03, smp.z + smp.nz * offs[k]);
@@ -200,6 +217,55 @@ export function buildEnvironment(track: Track, q: QualityProfile, seed = 1): Env
     road.renderOrder = 1;
     group.add(road);
     disposables.push(g);
+  }
+
+  // ---------------------------------------------------------------- canal cover strips + hazards
+  let hazardUpdate: ((t: number) => void) | null = null;
+  if (field) {
+    if (field.canals.length > 0) {
+      const pos: number[] = [], col: number[] = [], uv: number[] = [], idx: number[] = [];
+      const grass = new THREE.Color(0x7dbf45);
+      for (const c of field.canals) {
+        const span = ((c.s1 - c.s0) % L + L) % L;
+        const steps = Math.ceil(span);
+        for (let i = 0; i <= steps; i++) {
+          const pt = track.pointAt(c.s0 + (span * i) / steps);
+          const { outer } = field.canalEdges(pt.halfWidth);
+          const ds = [outer + 0.3, outer + 4.5, outer + 7];
+          const al = [1, 1, 0];
+          for (let k = 0; k < 3; k++) {
+            const sd = c.side * ds[k];
+            pos.push(pt.x + pt.nx * sd, 0.012, pt.z + pt.nz * sd);
+            col.push(grass.r, grass.g, grass.b, al[k]);
+            uv.push(ds[k] / 3, (i * span) / steps / 3);
+          }
+          if (i > 0) {
+            const b0 = (pos.length / 3) - 6;
+            for (let k = 0; k < 2; k++) {
+              const a = b0 + k, b2 = a + 1, c2 = a + 3, d2 = c2 + 1;
+              if (c.side > 0) idx.push(a, c2, b2, b2, c2, d2); else idx.push(a, b2, c2, b2, d2, c2);
+            }
+          }
+        }
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      g.setAttribute('color', new THREE.Float32BufferAttribute(col, 4));
+      g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+      g.setIndex(idx);
+      g.computeVertexNormals();
+      const cover = new THREE.Mesh(g, new THREE.MeshStandardMaterial({
+        vertexColors: true, transparent: true, depthWrite: false, roughness: 1, map: speckleTexture(13, 256, 0.25, 3000),
+        side: THREE.DoubleSide,
+      }));
+      cover.receiveShadow = true;
+      cover.renderOrder = 1;
+      group.add(cover);
+      disposables.push(g);
+    }
+    const hz = buildHazards(field, q.shadows);
+    group.add(hz.group);
+    hazardUpdate = hz.update;
   }
 
   // ---------------------------------------------------------------- start line + arch
@@ -502,6 +568,7 @@ export function buildEnvironment(track: Track, q: QualityProfile, seed = 1): Env
       const off = side * (p.halfWidth + (near ? rng.range(0.6, track.def.vergeWidth + 0.5) : rng.range(track.def.vergeWidth + 0.5, 35)));
       const x = p.x + p.nx * off + rng.range(-1, 1), z = p.z + p.nz * off + rng.range(-1, 1);
       if (z < terrain.coastZ(x) + 10) continue;
+      if (Math.abs(off) < p.halfWidth + CANAL.gap + CANAL.width + 3 && inCanalZone(x, z, 0.6)) continue;
       const sc = rng.range(0.8, 1.6);
       list.push(mat4(x, terrain.heightAt(x, z), z, rng.range(0, 6.28), 0, 0, sc, sc * rng.range(0.8, 1.3), sc));
     }
@@ -558,6 +625,7 @@ export function buildEnvironment(track: Track, q: QualityProfile, seed = 1): Env
     group, terrain, colliders, spectatorSpots,
     update(time: number) {
       windUniforms.uTime.value = time;
+      hazardUpdate?.(time);
       if (clouds) clouds.position.x = Math.sin(time * 0.01) * 30;
       buntings.forEach((m, i) => { m.rotation.z = Math.sin(time * 2 + i) * 0.004; });
       const seaMap = (sea.material as THREE.MeshStandardMaterial).map!;

@@ -182,6 +182,58 @@ export class AudioEngine {
   wrongWay(): void {
     this.tone(220, 'sawtooth', 0.06, 0.25);
   }
+  /** Rising wobble warning when the tyre turns UNSTABLE. */
+  wobbleWarn(): void {
+    this.tone(300, 'triangle', 0.07, 0.12, 0, 520);
+    this.tone(300, 'triangle', 0.07, 0.12, 0.13, 520);
+  }
+  whoosh(k = 0.6): void {
+    this.burst(900, 0.6, 0.18 * k, 0.35, 0, 'bandpass');
+  }
+  land(k = 0.6): void {
+    this.burst(220, 0.8, 0.45 * k, 0.16, 0, 'lowpass');
+    this.tone(95, 'sine', 0.3 * k, 0.15, 0, 55);
+  }
+  splash(): void {
+    this.burst(1200, 0.5, 0.4, 0.5, 0, 'bandpass');
+    this.burst(400, 0.7, 0.3, 0.6, 0.05, 'lowpass');
+  }
+  catchTyre(): void {
+    this.tone(660, 'triangle', 0.06, 0.06);
+    this.burst(2500, 3, 0.08, 0.04, 0.02);
+  }
+  boost(): void {
+    this.tone(330, 'sawtooth', 0.06, 0.45, 0, 990);
+    this.tone(495, 'square', 0.04, 0.4, 0.03, 1320);
+  }
+  /** Rolling through dog poo. */
+  squish(): void {
+    this.tone(160, 'sine', 0.2, 0.18, 0, 70);
+    this.burst(500, 2, 0.15, 0.12, 0.02, 'lowpass');
+  }
+  clean(): void {
+    [1047, 1319, 1568].forEach((f, i) => this.tone(f, 'sine', 0.08, 0.12, i * 0.06));
+  }
+  /** Cartoon bonk + birdies. */
+  stun(): void {
+    this.tone(700, 'square', 0.1, 0.25, 0, 180);
+    [1800, 2200, 1900, 2400].forEach((f, i) => this.tone(f, 'sine', 0.04, 0.08, 0.25 + i * 0.1));
+  }
+  clunk(): void {
+    this.burst(350, 1.2, 0.35, 0.12, 0, 'lowpass');
+    this.tone(140, 'triangle', 0.15, 0.1, 0, 90);
+  }
+  thunk(): void {
+    this.tone(180, 'triangle', 0.25, 0.14, 0, 110);
+    this.burst(700, 2, 0.12, 0.06);
+  }
+  /** A friendly street-dog bark: two short noisy tones. */
+  bark(): void {
+    for (const t of [0, 0.22]) {
+      this.tone(520, 'sawtooth', 0.12, 0.1, t, 300);
+      this.burst(900, 1.5, 0.18, 0.09, t, 'bandpass');
+    }
+  }
 
   // ------------------------------------------------------------------ music
   /**

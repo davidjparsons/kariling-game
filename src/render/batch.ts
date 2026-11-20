@@ -17,10 +17,13 @@ export class BatchBuilder {
       g.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(g.getAttribute('position').count * 2), 2));
     }
     const n = g.getAttribute('position').count;
-    const col = new THREE.Color(color ?? 0xffffff);
-    const arr = new Float32Array(n * 3);
-    for (let i = 0; i < n; i++) { arr[i * 3] = col.r; arr[i * 3 + 1] = col.g; arr[i * 3 + 2] = col.b; }
-    g.setAttribute('color', new THREE.BufferAttribute(arr, 3));
+    // Keep baked vertex colours when no flat colour is given.
+    if (color !== undefined || !g.getAttribute('color')) {
+      const col = new THREE.Color(color ?? 0xffffff);
+      const arr = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) { arr[i * 3] = col.r; arr[i * 3 + 1] = col.g; arr[i * 3 + 2] = col.b; }
+      g.setAttribute('color', new THREE.BufferAttribute(arr, 3));
+    }
     for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv', 'color'].includes(k)) g.deleteAttribute(k);
     let list = this.groups.get(mat);
     if (!list) { list = []; this.groups.set(mat, list); }

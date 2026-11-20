@@ -22,6 +22,8 @@ export interface Settings {
   touchControls: 'auto' | 'on' | 'off';
   difficulty: Difficulty;
   laps: number;
+  /** Show the physics debug panel (speed, instability, control state, contact...). */
+  debugHud: boolean;
 }
 
 export interface TrackRecord {
@@ -84,6 +86,7 @@ export const DEFAULT_SETTINGS: Settings = {
   touchControls: 'auto',
   difficulty: 'normal',
   laps: 3,
+  debugHud: false,
 };
 
 export function sanitizeNickname(name: string): string {

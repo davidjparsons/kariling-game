@@ -12,7 +12,9 @@ import { buildEnvironment, type EnvironmentBuild } from './render/environment';
 import { QUALITY, type Quality } from './render/quality';
 import { RacerView } from './render/racerView';
 import { Stage } from './render/stage';
-import { createRacerState } from './sim/physics';
+import { createRacerState, runnerConfig } from './sim/physics';
+import { HazardField } from './sim/hazards';
+import { TYRES } from './config/tyres';
 import { Track } from './sim/track';
 import { LocalStore, type Settings } from './storage/local';
 import { BARANGAY_DASH } from './tracks/barangayDash';
@@ -31,6 +33,7 @@ class App {
   private input = new InputManager();
   private dust: DustSystem;
   private track = new Track(BARANGAY_DASH);
+  private field = new HazardField(this.track, this.track.def.hazards ?? [], this.track.def.canals ?? []);
   private env!: EnvironmentBuild;
   private envQuality: Quality | null = null;
   private ui: HTMLElement;
@@ -58,6 +61,7 @@ class App {
     this.audio.setVolumes(this.settings.sfxVolume, this.settings.musicVolume);
     this.input.autoPush = this.settings.autoPush;
     this.input.onPause = () => this.togglePause();
+    this.input.onDebug = () => this.applySettings({ debugHud: !this.settings.debugHud });
     this.input.onCamera = () => {
       const order = ['near', 'normal', 'far'] as const;
       this.applySettings({ camera: order[(order.indexOf(this.settings.camera) + 1) % 3] });
@@ -101,7 +105,7 @@ class App {
       for (const s of this.spectators) { this.stage.scene.remove(s.root); s.dispose(); }
       this.spectators = [];
     }
-    this.env = buildEnvironment(this.track, QUALITY[this.settings.quality], 7);
+    this.env = buildEnvironment(this.track, QUALITY[this.settings.quality], 7, this.field);
     this.envQuality = this.settings.quality;
     this.stage.scene.add(this.env.group);
     // Cheering villagers along the start straight.
@@ -133,7 +137,7 @@ class App {
       const s = this.track.length - 4 - row * 4.5 - col * 1.5;
       const pt = this.track.pointAt(s);
       const lane = (col === 0 ? -1 : 1) * 1.9;
-      const ph = createRacerState(pt.x + pt.nx * lane, pt.z + pt.nz * lane, pt.heading);
+      const ph = createRacerState(pt.x + pt.nx * lane, pt.z + pt.nz * lane, pt.heading, runnerConfig(lo.appearance.age, TYRES[lo.tyreId].radius));
       v.userState = ph;
       this.stage.scene.add(v.group);
       this.showroom.push(v);
@@ -161,12 +165,17 @@ class App {
     } else {
       for (const v of this.showroom) {
         const st = v.userState!;
-        v.update(dt, { x: st.x, z: st.z, heading: st.heading, phys: st });
+        v.update(dt, { x: st.x, z: st.z, heading: st.heading, rx: st.rx, rz: st.rz, rHeading: st.rHeading, phys: st, tyreGround: 0, runnerGround: 0 });
       }
       const sp = this.track.pointAt(this.track.length - 8);
       this.camera.orbit(this.time * 0.8 + 2, sp.x, sp.z, 13, 3.0, 0.6);
       this.stage.followSun(sp.x, sp.z);
       this.dust.update(dt);
+    }
+    if (this.devCam) {
+      const c = this.camera.camera;
+      c.position.set(...this.devCam.pos);
+      c.lookAt(...this.devCam.look);
     }
     this.stage.render(this.camera.camera);
 
@@ -179,6 +188,19 @@ class App {
       this.fpsFrames = 0;
     }
   };
+
+  /** Dev/testing only: pin the camera (position, look-at) for close-up inspection. */
+  devCam: { pos: [number, number, number]; look: [number, number, number] } | null = null;
+
+  /** Dev/testing only: frame a racer from a given angle and distance. */
+  devCloseup(index: number, yawDeg = 30, dist = 2.2, height = 0.9): void {
+    const r = this.race?.session.racers[index];
+    if (!r) return;
+    const p = r.phys;
+    const cx = (p.x + p.rx) / 2, cz = (p.z + p.rz) / 2;
+    const a = p.heading + (yawDeg * Math.PI) / 180;
+    this.devCam = { pos: [cx + Math.sin(a) * dist, height, cz + Math.cos(a) * dist], look: [cx, 0.5, cz] };
+  }
 
   /** Dev/testing helper: advance the game by `seconds` of fixed frames regardless of rAF throttling. */
   devAdvance(seconds: number, fps = 30, autopilot = false): void {
@@ -219,7 +241,7 @@ class App {
     this.race = new RaceController({
       track: this.track, laps: this.settings.laps, difficulty: this.settings.difficulty,
       player: { id: this.store.profile.guestId, name: this.store.profile.nickname, loadout: DEFAULT_PLAYER },
-      showTouch: touch, seed: Math.floor(Math.random() * 1e6),
+      showTouch: touch, seed: Math.floor(Math.random() * 1e6), debugHud: this.debugHud,
     }, {
       stage: this.stage, env: this.env, camera: this.camera, input: this.input, audio: this.audio, dust: this.dust, uiRoot: this.hudLayer,
     });
@@ -267,11 +289,16 @@ class App {
     this.camera.distance = this.settings.camera;
     this.input.autoPush = this.settings.autoPush;
     this.audio.setVolumes(this.settings.sfxVolume, this.settings.musicVolume);
+    this.race?.setDebug(this.debugHud);
     if (this.settings.quality !== prevQuality) {
       this.stage.applyQuality(this.settings.quality);
       this.stage.resize(this.camera.camera);
       if (!this.race) { this.ensureEnvironment(); }
     }
+  }
+
+  private get debugHud(): boolean {
+    return this.settings.debugHud || new URLSearchParams(location.search).has('debug');
   }
 
   // ------------------------------------------------------------------ events
@@ -283,7 +310,7 @@ class App {
       const raw = segBtn.dataset.value!;
       segBtn.parentElement!.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === segBtn));
       this.audio.click();
-      const value: unknown = seg === 'laps' ? Number(raw) : seg === 'autoPush' ? raw === 'true' : raw;
+      const value: unknown = seg === 'laps' ? Number(raw) : seg === 'autoPush' || seg === 'debugHud' ? raw === 'true' : raw;
       this.applySettings({ [seg]: value } as Partial<Settings>);
       if (seg === 'laps' && this.screen === 'setup') this.showSetup();
       return;

@@ -114,19 +114,20 @@ export class HazardField {
     return { inner, outer: inner + CANAL.width };
   }
 
-  canalSideAt(s: number): -1 | 0 | 1 {
+  /** Is there a canal on this side (-1 left, +1 right) at arc length s? Both sides can have one. */
+  hasCanal(s: number, side: number): boolean {
     for (const c of this.canals) {
+      if (c.side !== side) continue;
       const inside = c.s0 <= c.s1 ? s >= c.s0 && s < c.s1 : s >= c.s0 || s < c.s1;
-      if (inside) return c.side;
+      if (inside) return true;
     }
-    return 0;
+    return false;
   }
 
   /** True if (s, d) is down in a canal trench. */
   inCanal(s: number, d: number, halfWidth: number): boolean {
     if (this.canals.length === 0) return false;
-    const side = this.canalSideAt(s);
-    if (side === 0 || Math.sign(d) !== side) return false;
+    if (!this.hasCanal(s, Math.sign(d))) return false;
     const { inner, outer } = this.canalEdges(halfWidth);
     const ad = Math.abs(d);
     return ad > inner && ad < outer;
