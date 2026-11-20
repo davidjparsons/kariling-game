@@ -4,8 +4,10 @@ _Last updated: 2026-11-20 (session 1)_
 
 ## Current phase
 
-**Phase 1 — Playable single-player game: complete and ready for playtesting.**
-Phase 2 has **not** been started (by instruction: stop after Phase 1 for review).
+**Phase 1 — complete.** Now working on **Milestone 1.5 — racing feel, collisions and street hazards** on Barangay Dash (spec §24). Phase 2 has not been started.
+
+### Milestone 1.5 status: IN PROGRESS
+(This section is updated as features land. See the bottom of this file for the final status.)
 
 ## Completed (Phase 1)
 

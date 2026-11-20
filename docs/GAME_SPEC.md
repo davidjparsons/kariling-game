@@ -1055,3 +1055,62 @@ Do not spend the initial session configuring Cloudflare, databases or multiplaye
 **The immediate goal is simple: I want to open my browser and have fun racing a tyre through a colourful Filipino village against three AI opponents.**
 
 Once Phase 1 is ready for me to test, stop before starting Phase 2.
+
+---
+
+# 24. Milestone 1.5 — Racing feel, collisions and street hazards (session 2, 2026-11-20)
+
+Continue on the existing Barangay Dash track and Phase 1 codebase. Do not rebuild, change frameworks, reset progress or start future tracks. Preserve controls, camera, lap timing, checkpoints, AI, results and mobile/iPad support. New references: `docs/reference/14.webp` (cut-tyre speed-hump strip), `15.png` (stick with half-cylinder scoop, red box), `16.webp` (tyre bouncing over a dirt mound), `17.png` (askals / street dogs).
+
+Priority order: tyre physics + three control states + collisions first, then visuals, then hazards.
+
+## 24.1 Graphics and models
+- Characters more anatomically recognisable but still colourful and stylised: better hands, feet, clothing, faces, proportions.
+- Tyres with truly circular profiles, visible tread, detailed sidewalls.
+- Better road surfaces, terrain transitions, grass and environment detail. Avoid lazy smooth ovals where shaped geometry looks better.
+- Keep mobile/iPad performance. Polished stylised 3D, not photorealism.
+
+## 24.2 Stick and scoop
+- Max stick length: **children 70 cm, adults 100 cm**, at consistent scale. Adjust runner position/animation so the stick still reaches.
+- Half-cylinder scoop/curved channel at the contact end (recycled vinegar bottle or cut pineapple tin, see ref 15).
+- The scoop visibly contacts and guides the tyre, follows the contact area, doesn't constantly clip, and tyre/stick/runner stay visible from the chase camera. The runner visibly pushes. Materials should be swappable later.
+
+## 24.3 Humps and obstacles
+Types: raised cement humps; dirt mounds; logs across or partly across the road; strips of cut-open old tyres (ref 14); old motorbike tyres lying flat; fallen coconut fronds and branches; larger dirt ramps that launch the wheel.
+- Distinct geometry and collision behaviour. Intentional, varied placement with room to steer around some.
+- Depending on speed, angle and obstacle: bounce, launch, wobble/lean, lose scoop contact, wheel runs ahead of the runner, loss of control.
+- Real airborne state with vertical motion, arcade trajectory and landing reaction (no teleporting). If the wheel separates, the runner chases to regain control. Small bumps manageable; big ramps at full speed risky.
+
+## 24.4 Rebalanced handling
+The game was too easy (max speed held all race). Improve speed-dependent steering, cornering stability, lean, wobble build-up/recovery, momentum, terrain grip, stick contact, air control and landing stability. Sharp turns at high speed must be genuinely risky, with visible warnings (growing wobble) before loss of control. No random or unavoidable failures; masterable. Flat-out everywhere must not be optimal. Keep tyre types distinct and parameters configurable.
+
+## 24.5 Racer collisions
+No ghosting. Collisions between tyres, tyres and runners, runners, sticks/scoops where meaningful, and racers vs obstacles. Consequences depend on relative speed and angle: deflection, speed loss, side-impact wobble, loss of balance, runner shoved off line. Playful, no launching, overlap, jitter or getting stuck. Simplified hitboxes are fine. AI uses the same rules.
+
+## 24.6 Street dogs (askals/aspins)
+A few stylised dogs at chosen roadside spots: idle/wander/sit/rest. Racer enters trigger → bark/warning → short, time-limited chase from behind → reset. If caught: family-friendly cartoon stun (brief speed loss/loss of control, reaction, wobble, short recovery), like being hit by an item in a kart racer. No gore, no endless chases, no repeat stuns without a recovery window, nothing unavoidable. AI affected too.
+
+## 24.7 Potholes and mud
+Potholes: visible depressions; wheel drops/bounces; speed loss; instability; possible loss of stick contact at speed. Mud: less grip, more rolling resistance, slower acceleration, splash effects, slipping when turning hard. Clearly visible so players can pick lines. Tyre types handle them differently.
+
+## 24.8 Roadside canals
+Open drainage canals beside some paved sections, built as real recessed geometry. Too close to the edge → tyre falls/tips in, runner reacts, short crash/recovery, time penalty, safe respawn at the last valid track position. Never trapped. Deliberate placement, visible edges, enough road width.
+
+## 24.9 Speed boosts
+Clearly marked boost sections: temporary extra acceleration/speed, visual + audio feedback, limited duration, higher instability when cornering boosted. Reward good lines without guaranteeing victory. Never right before unavoidable hazards.
+
+## 24.10 Dog poo
+Occasional cartoon poo (recognisable, not gross). Rolling through it dirties the tyre: less grip/speed, runner reacts, player must briefly pull aside/slow to clean (short humorous cleaning), then handling returns. A real mechanic, short penalty, no long unskippable animation. AI must handle it too.
+
+## 24.11 Balance and track design
+Not an obstacle course. Mix safe straights, challenging corners, optional risky lines/shortcuts, visible obstacles, boosts, occasional dog zones, terrain variation and careful jumps, with reaction time between hazards and difficulty building through the lap. AI must navigate and avoid hazards intelligently. Temporary invulnerability after major stun/recovery events.
+
+## 24.12 Three tyre-control states (core feature)
+A real physics/gameplay state machine with configurable thresholds and hysteresis:
+1. **CONTROLLED** — upright, scoop in contact, predictable steering/acceleration, runner alongside, subtle natural movement even on straights.
+2. **UNSTABLE** — from excessive cornering speed, sharp steering, bumps, collisions, rough terrain, poor landings. Visible wobble and lean, less reliable stick contact, less predictable steering, runner visibly struggling, growing wobble as a warning. Recover by slowing, straightening and restoring contact.
+3. **OUT OF CONTROL** — instability past the threshold or a severe impact. Tyre loses the stick; may tumble, bounce, roll away or fall. Runner reacts and chases. No normal steering/acceleration until recovered; reasonable time penalty.
+Transitions account for tyre type, speed, cornering forces, terrain, impacts, airborne motion and stick contact, with a real chance to recover from UNSTABLE. Same for humans and AI, and integrated with jumps, collisions, dogs, potholes, mud and other hazards. Provide a debug HUD (speed, instability, control state, ground contact, stick contact).
+
+## 24.13 Engineering
+Inspect before changing; reusable modules; shared collision and hazard rules for humans and AI; deterministic fixed-timestep simulation; no frame-rate dependence; simplified collision shapes. Tests for collision resolution, wobble thresholds, airborne/landing, hazard triggers, stun durations, recovery, invulnerability, and checkpoint/lap preservation after crashes. Run type checking, tests and the production build; test in the browser. Update PROGRESS.md. Stop after this milestone for playtesting, and never claim incomplete features are finished.
