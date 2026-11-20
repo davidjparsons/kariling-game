@@ -61,7 +61,7 @@ describe('pedestrians', () => {
     let dodged = false;
     for (let i = 0; i < 1 / FIXED_DT; i++) {
       updatePedestrians(t, peds, [racerAt(t, p.s - 8, p.d, 10)], FIXED_DT, rng);
-      if (p.state === 'dodge') dodged = true;
+      if ((p.state as string) === 'dodge') dodged = true;
     }
     expect(dodged).toBe(true);
     let tOn = 0;

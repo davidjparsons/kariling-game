@@ -4,9 +4,10 @@ import { lerp, smoothstep } from '../core/math';
 import { Rng } from '../core/rng';
 import type { Track } from '../sim/track';
 import { BatchBuilder, mat4 } from './batch';
+import { buildCourt, type CourtBuild } from './court';
 import { addWind, sharedMaterials, windUniforms } from './materials';
 import {
-  addClothesline, addCourt, addHouse, addNipaHut, addSariSari, bananaGeometry, bushGeometry, grassGeometry, palmGeometry,
+  addClothesline, addHouse, addNipaHut, addSariSari, bananaGeometry, bushGeometry, grassGeometry, palmGeometry,
   part, rockGeometry, treeGeometry, type Footprint,
 } from './props';
 import type { QualityProfile } from './quality';
@@ -74,6 +75,8 @@ export class Terrain {
 }
 
 export interface EnvironmentBuild {
+  /** Basketball bounce positions since the last update (for positional sound). */
+  courtBounces: THREE.Vector3[];
   group: THREE.Group;
   terrain: Terrain;
   /** Static footprints (buildings, trees) for camera avoidance. */
@@ -426,6 +429,28 @@ export function buildEnvironment(track: Track, q: QualityProfile, seed = 1, fiel
     return true;
   };
 
+  // ---------------------------------------------------------------- basketball court
+  // Right behind the roadside fence on a gentle stretch, so racers see the game going by.
+  let court: CourtBuild | null = null;
+  const courtZones: Footprint[] = [];
+  for (let tries = 0; tries < 60 && !court; tries++) {
+    const side = tries % 2 === 0 ? 1 : -1;
+    const s = (0.09 + Math.floor(tries / 2) * 0.007) * L;
+    const p = track.pointAt(s);
+    const off = side * (edge(s) + 0.7 + 8.5);
+    const x = p.x + p.nx * off, z = p.z + p.nz * off;
+    const ok = [-9, 0, 9].every((k) => isFree(x + p.tx * k, z + p.tz * k, 8.6, 0.3)) && Math.abs(terrain.heightAt(x, z)) < 0.2;
+    if (!ok) continue;
+    // Court x axis points away from the road on this side.
+    court = buildCourt(mat4(x, 0, z, p.heading + (side > 0 ? Math.PI : 0)), q.shadows, q.foliage < 0.6 ? 4 : 6);
+    group.add(court.group);
+    for (const k of [-9, 0, 9]) {
+      placed.push({ x: x + p.tx * k, z: z + p.tz * k, r: 8.6 });
+      courtZones.push({ x: x + p.tx * k, z: z + p.tz * k, r: 9.2 });
+      colliders.push({ x: x + p.tx * k, z: z + p.tz * k, r: 8.6 });
+    }
+  }
+
   // Village layout by lap fraction.
   type Kind = 'house' | 'hut' | 'store' | 'line';
   const zones: { from: number; to: number; kinds: Kind[]; density: number }[] = [
@@ -455,19 +480,6 @@ export function buildEnvironment(track: Track, q: QualityProfile, seed = 1, fiel
           });
         }
       }
-    }
-  }
-
-  // Basketball court in the infield near the start straight (right side = infield).
-  for (let tries = 0; tries < 30; tries++) {
-    const s = (0.04 + tries * 0.008) * L;
-    const p = track.pointAt(s);
-    const off = edge(s) + 16;
-    const x = p.x + p.nx * off, z = p.z + p.nz * off;
-    if (isFree(x, z, 14, 1)) {
-      addCourt(buildings, mat4(x, 0, z, p.heading));
-      placed.push({ x, z, r: 14 });
-      break;
     }
   }
 
@@ -593,6 +605,7 @@ export function buildEnvironment(track: Track, q: QualityProfile, seed = 1, fiel
       const x = p.x + p.nx * off + rng.range(-1, 1), z = p.z + p.nz * off + rng.range(-1, 1);
       if (z < terrain.coastZ(x) + 10) continue;
       if (Math.abs(off) < p.halfWidth + CANAL.gap + CANAL.width + 3 && inCanalZone(x, z, 0.6)) continue;
+      if (courtZones.some((f) => (f.x - x) ** 2 + (f.z - z) ** 2 < f.r * f.r)) continue;
       const sc = rng.range(0.8, 1.6);
       list.push(mat4(x, terrain.heightAt(x, z), z, rng.range(0, 6.28), 0, 0, sc, sc * rng.range(0.8, 1.3), sc));
     }
@@ -645,10 +658,16 @@ export function buildEnvironment(track: Track, q: QualityProfile, seed = 1, fiel
   }
 
   const clouds = group.getObjectByName('clouds');
+  let lastTime = -1;
+  const noBounces: THREE.Vector3[] = [];
   return {
     group, terrain, colliders, spectatorSpots,
+    get courtBounces() { return court?.bounces ?? noBounces; },
     update(time: number) {
       windUniforms.uTime.value = time;
+      const dt = lastTime < 0 ? 0 : Math.min(0.1, Math.max(0, time - lastTime));
+      lastTime = time;
+      if (dt > 0) court?.update(dt);
       hazardUpdate?.(time);
       if (clouds) clouds.position.x = Math.sin(time * 0.01) * 30;
       buntings.forEach((m, i) => { m.rotation.z = Math.sin(time * 2 + i) * 0.004; });
@@ -662,6 +681,7 @@ export function buildEnvironment(track: Track, q: QualityProfile, seed = 1, fiel
       });
       for (const d of disposables) d.dispose();
       for (const sgn of signs) (sgn.material as THREE.Material).dispose();
+      court?.dispose();
     },
   };
 }

@@ -376,30 +376,6 @@ export function addSariSari(b: BatchBuilder, m: THREE.Matrix4, rng: Rng): void {
 }
 
 /** Barangay basketball court: slab, painted lines and two hoops. Returns nothing. */
-export function addCourt(b: BatchBuilder, m: THREE.Matrix4): void {
-  const M = sharedMaterials();
-  const box = new THREE.BoxGeometry(1, 1, 1);
-  const sub = (x: number, y: number, z: number, sx: number, sy: number, sz: number, ry = 0, rx = 0, rz = 0) =>
-    mat4(x, y, z, ry, rx, rz, sx, sy, sz).premultiply(m);
-  b.add(box, M.wall, sub(0, 0.05, 0, 15, 0.1, 26), 0xbdbab3);
-  // lines
-  const line = 0xffffff;
-  b.add(box, M.vc, sub(0, 0.11, 0, 14, 0.01, 0.12), line);
-  for (const s of [-1, 1]) {
-    b.add(box, M.vc, sub(s * 6.95, 0.11, 0, 0.12, 0.01, 25.5), line);
-    b.add(box, M.vc, sub(0, 0.11, s * 12.75, 14, 0.01, 0.12), line);
-    b.add(box, M.vc, sub(0, 0.11, s * 10.4, 4.8, 0.01, 0.12), 0xe57373);
-    b.add(box, M.vc, sub(-2.4, 0.11, s * 11.6, 0.12, 0.01, 2.4), 0xe57373);
-    b.add(box, M.vc, sub(2.4, 0.11, s * 11.6, 0.12, 0.01, 2.4), 0xe57373);
-    // hoop
-    b.add(new THREE.CylinderGeometry(0.1, 0.12, 3.6, 8), M.vc, sub(0, 1.8, s * 13.6, 1, 1, 1), 0x546e7a);
-    b.add(box, M.vc, sub(0, 3.4, s * 13.0, 0.12, 0.12, 1.3), 0x546e7a);
-    b.add(box, M.vc, sub(0, 3.5, s * 12.4, 1.8, 1.1, 0.06), 0xffffff);
-    b.add(box, M.vc, sub(0, 3.3, s * 12.36, 0.6, 0.45, 0.07), 0xe53935);
-    b.add(new THREE.TorusGeometry(0.23, 0.025, 6, 14), M.vc, sub(0, 3.05, s * 12.1, 1, 1, 1, 0, Math.PI / 2), 0xff6f00);
-  }
-}
-
 /** Clothesline with colourful laundry between two posts along local x. */
 export function addClothesline(b: BatchBuilder, m: THREE.Matrix4, rng: Rng): void {
   const M = sharedMaterials();

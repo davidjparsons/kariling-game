@@ -157,6 +157,11 @@ class App {
     this.last = now;
     this.time += dt;
     this.env?.update(this.time);
+    // Basketball bounces from the barangay court, quieter with distance.
+    for (const bpos of this.env?.courtBounces ?? []) {
+      const d = this.camera.camera.position.distanceTo(bpos);
+      if (d < 35) this.audio.dribble(Math.min(1, 6 / Math.max(6, d)) * 0.8);
+    }
     const specMode = this.race && !this.race.isDone && this.race.session.phase === 'racing' ? 'cheer' : 'idle';
     for (const s of this.spectators) s.animate(dt, { speed: 0, pushing: 0, lean: 0, wobble: 0, mode: specMode, modeTime: 0 });
 
