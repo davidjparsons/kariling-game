@@ -32,12 +32,17 @@ export const SURFACES: Record<SurfaceId, SurfaceConfig> = {
     id: 'gravel', name: 'Gravel', grip: 0.74, rollingResistance: 0.68, speedMul: 0.92,
     accelMul: 0.86, roughness: 0.6, dust: 0.6, dustColor: 0xb7ab98,
   },
+  // Off-road verge: slow to push through, draggy, slippery in the turns and bumpy in patches
+  // (see `grassPatch`). Narrow road tyres suffer most; knobbly MTB tyres cope best.
   grass: {
-    id: 'grass', name: 'Grass', grip: 0.8, rollingResistance: 1.5, speedMul: 0.74,
-    accelMul: 0.75, roughness: 0.3, dust: 0.12, dustColor: 0x8fbf4f,
+    id: 'grass', name: 'Grass', grip: 0.74, rollingResistance: 1.9, speedMul: 0.68,
+    accelMul: 0.68, roughness: 0.45, dust: 0.55, dustColor: 0x7cb342,
   },
   mud: {
     id: 'mud', name: 'Mud', grip: 0.55, rollingResistance: 1.8, speedMul: 0.66,
     accelMul: 0.6, roughness: 0.65, dust: 0.3, dustColor: 0x6b4a2b,
   },
 };
+
+/** Uneven-ground multiplier on grass roughness at a world point (0.5 smooth … 1.9 tussocky). */
+export const GRASS_PATCH = { scale: 0.32, min: 0.5, max: 1.9 } as const;

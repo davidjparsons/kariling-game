@@ -3,6 +3,7 @@ import type { RacerLoadout } from '../config/appearance';
 import { STICK_LENGTH } from '../config/gameplay';
 import { STICKS } from '../config/sticks';
 import { TYRES } from '../config/tyres';
+import { SURFACES } from '../config/surfaces';
 import type { RacerPhysicsState } from '../sim/physics';
 import { Runner, type GroundHeightFn, type RunnerMode } from './character';
 import { buildStick, buildTyre } from './kariling';
@@ -214,7 +215,11 @@ export class RacerView {
     const sideShift = Math.sin(leanAbs) * r * Math.sign(lean);
     // A leaning tyre rests on its shoulder, not its centreline: lift by the section half-width.
     const shoulderLift = Math.sin(leanAbs) * this.tube * 0.85;
-    this.tyreRoot.position.set(v.x + rxv * sideShift, p.y + Math.cos(leanAbs) * r + shoulderLift + 0.004, v.z + rzv * sideShift);
+    // Rough ground visibly jostles the wheel (render-only; physics keeps the true contact).
+    const surf = SURFACES[p.surface];
+    const shake = p.grounded && p.control !== 'lost' ? surf.roughness * Math.min(1, p.speed / 7) * 0.018 : 0;
+    const jitter = shake * Math.max(0, Math.sin(p.roll * 2.3) * Math.sin(p.roll * 5.1 + 1));
+    this.tyreRoot.position.set(v.x + rxv * sideShift, p.y + Math.cos(leanAbs) * r + shoulderLift + 0.004 + jitter, v.z + rzv * sideShift);
     this.tyreRoot.rotation.order = 'YZX';
     this.tyreRoot.rotation.set(0, h + p.wobble * 0.07 * Math.sin(p.wobblePhase * 1.3), lean);
     this.spin.rotation.x = p.roll;

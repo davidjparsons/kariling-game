@@ -119,6 +119,8 @@ export const EV_POO = 1 << 14;
 export const EV_STUN = 1 << 15;
 export const EV_HAZARD = 1 << 16;
 export const EV_RESPAWN = 1 << 17;
+/** The poo smell wore off by itself while racing on. */
+export const EV_AIRED = 1 << 18;
 
 export interface RunnerConfig {
   stickLength: number;
@@ -150,6 +152,10 @@ export interface Ground {
   launch: number;
   surface: SurfaceId;
   canal: boolean;
+  /** Near the road edge or on the verge — somewhere safe to pull over (e.g. to clean the tyre). */
+  roadside?: boolean;
+  /** Local roughness multiplier (uneven grass patches). */
+  rough?: number;
 }
 export type GroundFn = (x: number, z: number) => Ground;
 
@@ -302,11 +308,17 @@ export function stepRacer(st: RacerPhysicsState, input: RacerInput, ctx: Physics
       st.cleaning -= dt;
       st.speed = Math.max(0, st.speed - 6 * dt);
       if (st.cleaning <= 0) { st.cleaning = 0; st.dirt = 0; events |= EV_CLEANED; }
-    } else if (st.dirt > 0.05 && st.grounded && st.speed < PHYSICS.cleanMaxSpeed && input.push < 0.5 && st.stun <= 0) {
+    } else if (st.dirt > 0.05 && st.grounded && st.speed < PHYSICS.cleanMaxSpeed && input.push < 0.5 && st.stun <= 0 && g0.roadside) {
+      // Option A: pull over at the roadside and clean it off — quick, but you have to stop.
       st.cleaning = PHYSICS.cleanTime;
       events |= EV_CLEAN_START;
     }
-    if (st.dirt > 0 && surface.id === 'grass' && st.speed > 2) st.dirt = Math.max(0, st.dirt - PHYSICS.grassCleanRate * dt);
+    if (st.dirt > 0 && st.cleaning <= 0) {
+      // Option B: race on — the smell wears off by itself (faster if you scrub through grass).
+      const rub = surface.id === 'grass' && st.speed > 2 ? PHYSICS.grassCleanRate : 0;
+      st.dirt = Math.max(0, st.dirt - (1 / PHYSICS.dirtDuration + rub) * dt);
+      if (st.dirt === 0) events |= EV_AIRED;
+    }
 
     const control = hasControl(st);
     const contact = control ? st.stickContact : 0;
@@ -322,7 +334,8 @@ export function stepRacer(st: RacerPhysicsState, input: RacerInput, ctx: Physics
     const steerJerk = Math.abs(st.steer - prevSteer) / dt;
 
     // ---------------- longitudinal ----------------
-    const dirtK = st.dirt;
+    // Penalties stay near full strength until most of the smell has gone.
+    const dirtK = smoothstep(0, 0.35, st.dirt);
     const pushIn = control ? clamp(input.push, 0, 1) : 0;
     const effPush = pushIn * (balancing ? PHYSICS.balancePushMul : 1) * contact;
     const sf = staminaFactor(st.stamina);
@@ -369,12 +382,14 @@ export function stepRacer(st: RacerPhysicsState, input: RacerInput, ctx: Physics
       // Saturating: extreme inputs still lose control, but always after a readable wobble.
       const cornerStress = (PHYSICS.cornerStressGain * excess) / (1 + excess * PHYSICS.cornerStressSoftness);
       const jerkStress = steerJerk * speedNorm * speedNorm * PHYSICS.steerJerkGain;
-      const roughStress = surface.roughness * aff.rough * speedNorm * speedNorm * PHYSICS.roughStressGain;
+      // Lumpy patches (tussocky grass) jolt the tyre even at modest off-road speeds.
+      const lumps = Math.max(0, (g0.rough ?? 1) - 1) * aff.rough * (st.speed / 8) ** 2 * PHYSICS.lumpStressGain;
+      const roughStress = surface.roughness * aff.rough * (g0.rough ?? 1) * speedNorm * speedNorm * PHYSICS.roughStressGain + lumps;
       const mul = tyre.instabilityMul * stick.stabilityMul;
       st.stressCorner = cornerStress * mul; st.stressJerk = jerkStress * mul; st.stressRough = roughStress * mul;
       const unattended = st.separated && st.speed > 1.5 ? PHYSICS.unattendedInstability : 0;
       const gain = (cornerStress + jerkStress + roughStress) * tyre.instabilityMul * stick.stabilityMul
-        * (boosting ? PHYSICS.boostInstabilityMul : 1) * (1 + 0.3 * dirtK) + unattended;
+        * (boosting ? PHYSICS.boostInstabilityMul : 1) * (1 + PHYSICS.dirtInstabilityMul * dirtK) + unattended;
       const calm = (1 - 0.75 * smoothstep(thr * 0.6, thr, load)) * (steerJerk < 1.5 ? 1 : 0.6);
       const recovery = tyre.recoveryRate * calm * (balancing ? PHYSICS.balanceRecoveryMul : 1)
         * lerp(PHYSICS.recoverySlowMul, PHYSICS.recoveryFastMul, Math.min(1, speedNorm));

@@ -28,20 +28,22 @@ export interface AiProfile {
   awareness: number;
   /** Takes the jump instead of the log. */
   takesRamps: boolean;
+  /** Dirty tyre: pull over and clean it if the dirt is at least this fresh (> 1 = always race on). */
+  cleanIfDirt: number;
 }
 
 export const AI_PROFILES: Record<Difficulty, AiProfile> = {
   easy: {
     cornerSafety: 0.72, pushCap: 0.72, steerGain: 1.5, mistakeRate: 0.035, balanceAt: 0.38, staminaReserve: 0.08,
-    lineSkill: 0.2, hazardSpeedMul: 0.85, awareness: 0.6, takesRamps: false,
+    lineSkill: 0.2, hazardSpeedMul: 0.85, awareness: 0.6, takesRamps: false, cleanIfDirt: 0.5,
   },
   normal: {
     cornerSafety: 0.98, pushCap: 0.9, steerGain: 1.9, mistakeRate: 0.02, balanceAt: 0.34, staminaReserve: 0.18,
-    lineSkill: 0.5, hazardSpeedMul: 1, awareness: 0.85, takesRamps: false,
+    lineSkill: 0.5, hazardSpeedMul: 1, awareness: 0.85, takesRamps: false, cleanIfDirt: 0.85,
   },
   hard: {
     cornerSafety: 1.18, pushCap: 1.0, steerGain: 2.2, mistakeRate: 0.008, balanceAt: 0.3, staminaReserve: 0.25,
-    lineSkill: 0.8, hazardSpeedMul: 1.25, awareness: 1, takesRamps: true,
+    lineSkill: 0.8, hazardSpeedMul: 1.25, awareness: 1, takesRamps: true, cleanIfDirt: 2,
   },
 };
 
@@ -56,6 +58,8 @@ export class BotController {
   private mistakeTime = 0;
   private mistakeSteer = 0;
   private resting = false;
+  /** Pulling over to clean the tyre: −1 left, +1 right, 0 no. */
+  private pullSide = 0;
   /** Hazards this bot failed to notice (rolled once per hazard per lap section). */
   private blind = new Map<number, number>();
   /** Extra push scaling for gentle catch-up (set by the race director). */
@@ -91,10 +95,17 @@ export class BotController {
     // Out of control: the runner is chasing; hold balance to speed up the pick-up.
     if (p.control === 'lost') return { steer: 0, push: 0, brake: 0, balance: true };
 
-    // --- Lane choice: racing line, overtaking, hazards, canals ---
-    let desired = this.laneBias;
+    // --- Dirty tyre: easy bots pull over and clean; hard bots race on and let it air out ---
     const kAhead = track.sampleAt(s + 12 + p.speed).curvature;
-    desired += -Math.sign(kAhead) * clamp(Math.abs(kAhead) * 30, 0, 1) * hw * 0.55 * prof.lineSkill;
+    if (p.dirt <= 0.05 || p.cleaning > 0) this.pullSide = 0;
+    else if (this.pullSide === 0 && !this.cruising && p.dirt >= prof.cleanIfDirt && Math.abs(kAhead) < 0.03) {
+      this.pullSide = self.lastD >= 0 ? 1 : -1;
+    }
+    const pullOver = this.pullSide !== 0;
+
+    // --- Lane choice: racing line, overtaking, hazards, canals ---
+    let desired = pullOver ? this.pullSide * hw : this.laneBias;
+    if (!pullOver) desired += -Math.sign(kAhead) * clamp(Math.abs(kAhead) * 30, 0, 1) * hw * 0.55 * prof.lineSkill;
     for (const o of all) {
       if (o === self) continue;
       const ds = o.progress.raceDistance - self.progress.raceDistance;
@@ -193,10 +204,9 @@ export class BotController {
       steer *= 0.7;
     }
 
-    // --- Dirty tyre: pull up on a straight and clean it ---
-    if (p.dirt > 0.3 && Math.abs(kAhead) < 0.02 && !this.cruising) {
-      push = 0;
-      brake = 1;
+    if (pullOver) {
+      // Ease off on the way to the edge, stop once there (cleaning starts at the roadside).
+      if (Math.abs(self.lastD) > hw - 1.15) { push = 0; brake = 1; } else { push = Math.min(push, 0.4); if (p.speed > 6) brake = 0.5; }
     }
     if (p.cleaning > 0) { push = 0; brake = 1; }
 

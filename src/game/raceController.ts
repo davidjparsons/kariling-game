@@ -4,7 +4,7 @@ import { SURFACES } from '../config/surfaces';
 import { AI_PROFILES, BotController, type Difficulty } from '../sim/ai';
 import {
   EV_BOOST, EV_BUMP, EV_CANAL, EV_CATCH, EV_CLEAN_START, EV_CLEANED, EV_FALL, EV_LAND, EV_LAUNCH, EV_POO,
-  EV_RECOVERED, EV_RESPAWN, EV_SEPARATE, EV_STUN, EV_TAP, EV_UNSTABLE, type RacerInput,
+  EV_AIRED, EV_RECOVERED, EV_RESPAWN, EV_SEPARATE, EV_STUN, EV_TAP, EV_UNSTABLE, type RacerInput,
 } from '../sim/physics';
 import { populateGrid, RaceSession, type RaceRacer, type RacerSetup } from '../sim/race';
 import type { Track } from '../sim/track';
@@ -253,6 +253,7 @@ export class RaceController {
       }
       if (e & EV_CLEAN_START) view.react('Linis!', null, 0.9);
       if (e & EV_CLEANED) { if (me) { a.clean(); this.hud.notice('Clean! Go go go!', 1, '✨', 'good'); } this.sparkle(r, 0xffffff, 10); }
+      if (e & EV_AIRED && me) this.hud.notice('Smell’s gone!', 1.2, '🌬', 'good');
       if (e & EV_STUN) {
         if (near) a.stun();
         view.react('ARAY!', null, 1.1, '#ffccbc');
@@ -370,6 +371,17 @@ export class RaceController {
         if (ph.surface === 'mud' && Math.random() < ph.speed * 1.5 * dt) {
           this.burstSplash(x, 0.1, z, 0x4e3420, 2);
         }
+        // Grass: clippings and clods kicked up, more on lumpy patches.
+        if (ph.surface === 'grass' && Math.random() < ph.speed * 2.2 * dt) {
+          const col = Math.random() < 0.7 ? 0x6fae3a : 0x7a5a32;
+          this.deps.dust.emit(x + (Math.random() - 0.5) * 0.25, ph.y + 0.08, z + (Math.random() - 0.5) * 0.25,
+            -Math.sin(heading) * 1.2 + (Math.random() - 0.5), 1.2 + Math.random() * 1.2, -Math.cos(heading) * 1.2 + (Math.random() - 0.5), col, 0.45);
+        }
+      }
+      // Cartoon stink trail while racing on with a dirty tyre.
+      if (ph.dirt > 0.05 && Math.random() < 9 * ph.dirt * dt) {
+        this.deps.dust.emit(x + (Math.random() - 0.5) * 0.3, ph.y + 0.3 + Math.random() * 0.3, z + (Math.random() - 0.5) * 0.3,
+          (Math.random() - 0.5) * 0.3, 0.35, (Math.random() - 0.5) * 0.3, 0x9ccc65, 1.3);
       }
       if (ph.boost > 0 && Math.random() < 30 * dt) {
         this.deps.dust.emit(x, ph.y + 0.35, z, (Math.random() - 0.5) * 0.6, 0.6, (Math.random() - 0.5) * 0.6, 0xffc400, 0.45);

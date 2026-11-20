@@ -6,7 +6,7 @@ import { TYRES } from '../src/config/tyres';
 import { createDogs, updateDogs, type DogTarget } from '../src/sim/dogs';
 import { HazardField, profileHeight, type HazardPlacement } from '../src/sim/hazards';
 import {
-  applyStun, createRacerState, EV_BOOST, EV_CANAL, EV_CLEANED, EV_POO, runnerConfig, stepRacer, type GroundFn,
+  applyStun, createRacerState, EV_AIRED, EV_BOOST, EV_CANAL, EV_CLEAN_START, EV_CLEANED, EV_POO, runnerConfig, stepRacer, type GroundFn,
 } from '../src/sim/physics';
 import { RaceSession, type RacerSetup } from '../src/sim/race';
 import { Track, type TrackDefinition } from '../src/sim/track';
@@ -133,19 +133,41 @@ describe('hazard triggers', () => {
     expect(b.speed).toBeGreaterThan(a.speed * 1.05);
   });
 
-  it('dog poo dirties the tyre (slower) until the runner stops to clean it', () => {
+  it('dog poo: option A — pull over at the roadside and clean it off quickly', () => {
     const track = testTrack([{ type: 'poo', at: 0.15, d: 0, width: 4 }]);
     const s = new RaceSession(track, [me()], { laps: 1, difficulty: 'normal', seed: 1 });
     startRace(s);
     const { r, events } = drive(s, 13);
     expect(events & EV_POO).toBeTruthy();
     expect(r.phys.dirt).toBeGreaterThan(0.5);
-    // Brake to a stop: cleaning starts automatically and finishes quickly.
+    // Stopping in the middle of the road does NOT force a clean…
     let t = 0, ev = 0;
-    while (r.phys.dirt > 0 && t < 6) { s.step({ me: { steer: 0, push: 0, brake: 1, balance: false } }); ev |= r.events; t += FIXED_DT; }
+    while (t < 2.5) { s.step({ me: { steer: 0, push: 0, brake: 1, balance: false } }); ev |= r.events; t += FIXED_DT; }
+    expect(ev & EV_CLEAN_START).toBeFalsy();
+    expect(r.phys.dirt).toBeGreaterThan(0.3);
+    // …pulling over to the road edge does.
+    while (r.phys.dirt > 0 && t < 12) {
+      const pt = s.track.pointAt(r.progress.lastS + 3);
+      const want = Math.atan2(pt.x + pt.nx * 4.2 - r.phys.x, pt.z + pt.nz * 4.2 - r.phys.z);
+      const err = Math.atan2(Math.sin(want - r.phys.heading), Math.cos(want - r.phys.heading));
+      const atEdge = Math.abs(r.lastD) > track.sampleAt(r.progress.lastS).halfWidth - 1.1;
+      s.step({ me: { steer: Math.max(-1, Math.min(1, -err * 2)), push: atEdge ? 0 : 0.6, brake: atEdge ? 1 : 0, balance: false } });
+      ev |= r.events; t += FIXED_DT;
+    }
     expect(ev & EV_CLEANED).toBeTruthy();
     expect(r.phys.dirt).toBe(0);
-    expect(t).toBeLessThan(3.5);
+  });
+
+  it('dog poo: option B — racing on, the smell wears off by itself', () => {
+    const ctx = { tyre: TYRES.mtb, stick: STICKS.wood, runner: runnerConfig('child', TYRES.mtb.radius) };
+    const flat: GroundFn = () => ({ h: 0, launch: 0, surface: 'dirt', canal: false });
+    const st = createRacerState(0, 0, 0, ctx.runner);
+    st.dirt = 1;
+    let t = 0, ev = 0;
+    while (st.dirt > 0 && t < 30) { ev |= stepRacer(st, { steer: 0, push: 1, brake: 0, balance: false }, ctx, flat, FIXED_DT); t += FIXED_DT; }
+    expect(ev & EV_AIRED).toBeTruthy();
+    expect(ev & EV_CLEAN_START).toBeFalsy();
+    expect(t).toBeCloseTo(PHYSICS.dirtDuration, 0);
   });
 
   it('a dirty tyre is slower at the top end', () => {

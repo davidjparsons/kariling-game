@@ -27,6 +27,8 @@ export const PHYSICS = {
   /** Instability from jerky steering at speed (per steer-unit/sec, scaled by speed²). */
   steerJerkGain: 0.09,
   roughStressGain: 0.55,
+  /** Instability from uneven ground patches (per unit of roughness above 1, at 8 m/s). */
+  lumpStressGain: 0.9,
   /** Recovery multiplier at standstill vs top speed — slowing down is how you calm a wobble. */
   recoverySlowMul: 1.7,
   recoveryFastMul: 0.45,
@@ -110,14 +112,17 @@ export const PHYSICS = {
   stunSpeedKeep: 0.35,
   stunInstability: 0.35,
   invulnerableAfterStun: 2.5,
-  /** Dirty tyre penalties at full dirt. */
+  /** Dog-poo penalties at full dirt (cartoon smell + slippery tread). */
   dirtSpeedMul: 0.84,
   dirtGripMul: 0.75,
-  /** Slow below this to clean the tyre automatically. */
-  cleanMaxSpeed: 2.2,
-  cleanTime: 1.0,
-  /** Dirt rubbed off per second rolling on grass. */
-  grassCleanRate: 0.35,
+  dirtInstabilityMul: 0.4,
+  /** Racing on: seconds for the smell to wear off completely by itself. */
+  dirtDuration: 15,
+  /** Pulling over (near the road edge / on the verge) below this speed starts cleaning. */
+  cleanMaxSpeed: 2.6,
+  cleanTime: 0.9,
+  /** Extra dirt rubbed off per second rolling on grass. */
+  grassCleanRate: 0.12,
 
   // ---- Stamina -----------------------------------------------------------------
   /** Stamina per second spent at full acceleration effort. */

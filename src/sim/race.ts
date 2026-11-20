@@ -1,7 +1,8 @@
 import { FIXED_DT, PHYSICS, RACE } from '../config/gameplay';
 import { STICKS, type StickId } from '../config/sticks';
 import { TYRES, type TyreId } from '../config/tyres';
-import { clamp, wrapAngle, wrapDelta } from '../core/math';
+import { clamp, valueNoise2, wrapAngle, wrapDelta } from '../core/math';
+import { GRASS_PATCH } from '../config/surfaces';
 import { AI_PROFILES, BotController, type Difficulty } from './ai';
 import { resolveRacerCollisions } from './collisions';
 import { createDogs, updateDogs, type Dog, type DogEvent, type DogNav, type DogTarget } from './dogs';
@@ -160,7 +161,12 @@ export class RaceSession {
 
   groundAt(proj: TrackProjection): Ground {
     const g = this.field.sample(proj);
-    return { h: g.h, launch: g.launch, surface: g.surface ?? this.track.surfaceAt(proj), canal: g.canal };
+    const surface = g.surface ?? this.track.surfaceAt(proj);
+    // Grass is lumpy in patches (deterministic noise along the track).
+    const rough = surface === 'grass'
+      ? GRASS_PATCH.min + (GRASS_PATCH.max - GRASS_PATCH.min) * valueNoise2(proj.s * GRASS_PATCH.scale, proj.d * GRASS_PATCH.scale + 40)
+      : 1;
+    return { h: g.h, launch: g.launch, surface, canal: g.canal, roadside: Math.abs(proj.d) > proj.halfWidth - 1.2, rough };
   }
 
   /** Advance one fixed tick. `inputs` supplies human input by racer id. */
