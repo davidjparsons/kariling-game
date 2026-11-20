@@ -9,9 +9,11 @@ import { createDogs, updateDogs, type Dog, type DogEvent, type DogNav, type DogT
 import { HazardField, type Hazard } from './hazards';
 import { collectPickup, createPickups, tickPickups, touchedPickup, type Pickup } from './pickups';
 import { rollItem } from './effects';
+import { createPedestrians, updatePedestrians, type PedEvent, type Pedestrian, type PedRacer } from './pedestrians';
+import { PEDESTRIAN } from '../config/pedestrians';
 import { Rng } from '../core/rng';
 import {
-  addImpact, applyBoost, applyDirt, applyStun, createRacerState, EV_BOOST, EV_BUMP, EV_HAZARD, EV_ITEM_GET, EV_LAUNCH, EV_POO, giveItem,
+  addImpact, applyBoost, applyDirt, applyStun, createRacerState, EV_BOOST, EV_BUMP, EV_HAZARD, EV_ITEM_GET, EV_LAUNCH, EV_PED, EV_POO, giveItem,
   EV_RESPAWN, EV_STUN, NO_INPUT, resetControl, runnerConfig, stepRacer,
   type Ground, type GroundFn, type PhysicsContext, type RacerInput, type RacerPhysicsState,
 } from './physics';
@@ -85,6 +87,9 @@ export class RaceSession {
   readonly field: HazardField;
   readonly dogs: Dog[];
   readonly pickups: Pickup[];
+  readonly pedestrians: Pedestrian[];
+  /** Pedestrian events from the most recent tick. */
+  pedEvents: PedEvent[] = [];
   readonly racers: RaceRacer[];
   readonly opts: RaceOptions;
   phase: RacePhase = 'countdown';
@@ -118,6 +123,9 @@ export class RaceSession {
   };
   private dogEventsBuf: DogEvent[] = [];
   private itemRng: Rng;
+  private pedRng: Rng;
+  private pedRacers: PedRacer[] = [];
+  private pedBuf: PedEvent[] = [];
 
   constructor(track: Track, setups: RacerSetup[], opts: RaceOptions) {
     if (setups.length === 0 || setups.length > MAX_RACERS) throw new Error('A race needs 1–4 racers');
@@ -127,6 +135,8 @@ export class RaceSession {
     this.dogs = createDogs(track, track.def.dogs ?? []);
     this.pickups = createPickups(track, track.def.pickups ?? []);
     this.itemRng = new Rng(opts.seed * 7 + 13);
+    this.pedRng = new Rng(opts.seed * 11 + 5);
+    this.pedestrians = createPedestrians(track, track.def.pedestrians ?? [], this.pedRng);
     this.racers = setups.map((setup, i) => {
       // Two-by-two staggered grid behind the start line.
       const row = Math.floor(i / 2);
@@ -182,11 +192,13 @@ export class RaceSession {
     this.tick++;
     for (const r of this.racers) { r.events = 0; r.bumpImpact = 0; r.hazardHits.length = 0; }
     this.dogEvents = [];
+    this.pedEvents = [];
 
     if (this.phase === 'countdown') {
       this.countdown -= dt;
       if (this.countdown <= 0) { this.phase = 'racing'; this.countdown = 0; }
       this.updateDogs(dt);
+      this.updatePedestrians(dt);
       return;
     }
     if (this.phase === 'racing') this.time += dt;
@@ -226,6 +238,7 @@ export class RaceSession {
     }
 
     this.updateDogs(dt);
+    this.updatePedestrians(dt);
     tickPickups(this.pickups, dt);
 
     if (this.phase === 'racing' && this.racers.every((r) => r.progress.finished)) this.phase = 'finished';
@@ -259,6 +272,28 @@ export class RaceSession {
       if (cfg.effect === 'poo' && p.invuln <= 0) { applyDirt(p); r.events |= EV_POO; }
     }
     r.insideHazards = now;
+  }
+
+  /** Villagers crossing; contact slows and unsettles the racer (cartoon hop, no injuries). */
+  private updatePedestrians(dt: number): void {
+    if (this.pedestrians.length === 0) { this.pedEvents = []; return; }
+    this.pedRacers.length = 0;
+    for (const r of this.racers) {
+      const p = r.phys;
+      // Loose tyres and runners still bump people, but finished racers have left the course.
+      this.pedRacers.push({ s: r.progress.lastS, d: r.lastD, speed: r.progress.finished ? 0 : p.speed, x: p.x, z: p.z, rx: p.rx, rz: p.rz });
+    }
+    this.pedEvents = [...updatePedestrians(this.track, this.pedestrians, this.pedRacers, dt, this.pedRng, this.pedBuf)];
+    for (const e of this.pedEvents) {
+      if (e.type !== 'bump') continue;
+      const r = this.racers[e.racer];
+      const p = r.phys;
+      r.events |= EV_PED;
+      if (p.control === 'lost') continue;
+      const v = p.speed;
+      p.speed *= PEDESTRIAN.bumpSpeedKeep;
+      r.events |= addImpact(p, PEDESTRIAN.bumpInstability + PEDESTRIAN.bumpInstabilitySpeed * v, r.ctx);
+    }
   }
 
   /** Empty-handed racers collect a pickup they roll through and get a weighted random item. */

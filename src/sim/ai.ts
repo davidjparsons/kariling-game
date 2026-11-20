@@ -148,6 +148,16 @@ export class BotController {
       }
       if (bestBox) desired = bestBox.d;
     }
+    // Villagers on the road ahead: steer round them (and where they're heading), ease off.
+    for (const ped of session.pedestrians) {
+      if (ped.state !== 'cross' && ped.state !== 'dodge' && ped.state !== 'startled') continue;
+      const dist = ((ped.s - s) % track.length + track.length) % track.length;
+      if (dist < 0.5 || dist > look + 6) continue;
+      const dir = Math.sign(ped.toD - ped.d);
+      const ahead = ped.d + dir * Math.min(2.5, (dist / Math.max(2, p.speed)) * 1.4);
+      blocks.push([Math.min(ped.d, ahead) - 1.1, Math.max(ped.d, ahead) + 1.1]);
+      if (dist < 14) limitFromHazards = Math.min(limitFromHazards, 5 + dist * 0.4);
+    }
     const canalNear = (side: number) => field.hasCanal(s, side) || field.hasCanal(s + 10, side);
     let best = desired, bestCost = Infinity;
     for (let c = -hw + 0.9; c <= hw - 0.9; c += 0.25) {

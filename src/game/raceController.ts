@@ -14,6 +14,7 @@ import type { InputManager } from '../input/input';
 import type { ChaseCamera } from '../render/camera';
 import { DogView } from '../render/dogView';
 import { buildParol } from '../render/items';
+import { PedestrianViews } from '../render/pedestrianView';
 import * as THREE from 'three';
 import type { DustSystem } from '../render/effects';
 import type { EnvironmentBuild } from '../render/environment';
@@ -64,6 +65,7 @@ export class RaceController {
   readonly session: RaceSession;
   readonly views: RacerView[] = [];
   readonly dogViews: DogView[] = [];
+  private pedViews: PedestrianViews;
   /** Floating parol pickups, one per sim pickup. */
   private pickupViews: { group: THREE.Group; mats: THREE.MeshStandardMaterial[]; wasActive: boolean; spawnT: number }[] = [];
   readonly hud: Hud;
@@ -109,6 +111,9 @@ export class RaceController {
       deps.stage.scene.add(view.group);
       this.views.push(view);
     }
+    const groupScale = deps.stage.quality === 'low' ? 0.5 : deps.stage.quality === 'medium' ? 0.8 : 1;
+    this.pedViews = new PedestrianViews(cfg.track, this.session.pedestrians, cfg.track.def.pedestrians ?? [], groupScale, cfg.seed);
+    deps.stage.scene.add(this.pedViews.group);
     for (const pk of this.session.pickups) {
       const { group, materials } = buildParol();
       group.position.set(pk.x, 0.75, pk.z);
@@ -308,6 +313,12 @@ export class RaceController {
         if (h.type === 'mud') this.burstSplash(r.phys.x, 0.1, r.phys.z, 0x5a3d22, 10);
       }
     });
+    for (const ev of s.pedEvents) {
+      if (ev.type !== 'startCross') continue;
+      const ped = s.pedestrians[ev.ped];
+      const ahead = ((ped.s - p.progress.lastS) % s.track.length + s.track.length) % s.track.length;
+      if (ahead < 45) this.hud.toast('ped', '🚶', 'People crossing ahead', 1.6, 'warn');
+    }
     for (const ev of s.dogEvents) {
       const dv = this.dogViews[ev.dog];
       const dog = s.dogs[ev.dog];
@@ -447,6 +458,7 @@ export class RaceController {
 
     s.dogs.forEach((d, i) => this.dogViews[i].update(dt, d, Math.max(0, this.groundAt(d.x, d.z, -1, false))));
     this.updatePickups(dt);
+    this.pedViews.update(dt, s.pedestrians, s.racers.map((r) => r.phys));
 
     const p = this.player;
     const pi = s.racers.indexOf(p);
@@ -558,6 +570,8 @@ export class RaceController {
   }
 
   dispose(): void {
+    this.deps.stage.scene.remove(this.pedViews.group);
+    this.pedViews.dispose();
     for (const v of this.pickupViews) {
       this.deps.stage.scene.remove(v.group);
       v.group.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) { m.geometry.dispose(); (m.material as THREE.Material).dispose(); } });

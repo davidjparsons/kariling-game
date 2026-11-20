@@ -86,6 +86,17 @@ export const BARANGAY_DASH: TrackDefinition = {
     { at: 330 / 576, d: [-2.2, 0, 2.2] },
     { at: 471 / 576, d: [-2.4, 0, 2.4] },
   ],
+  // Villagers: crossings on straights with clear sightlines (people check for gaps), plus
+  // chatting groups outside homes and stores (behind the fence, scenery only).
+  pedestrians: [
+    { kind: 'crossing', at: 64 / 576, side: 1, count: 2 },
+    { kind: 'crossing', at: 142 / 576, side: -1, count: 2 },
+    { kind: 'crossing', at: 226 / 576, side: 1, count: 2 },
+    { kind: 'group', at: 0.16, side: -1, count: 3 },
+    { kind: 'group', at: 0.38, side: 1, count: 3 },
+    { kind: 'group', at: 0.47, side: -1, count: 2 },
+    { kind: 'group', at: 0.8, side: 1, count: 3 },
+  ],
   dogs: [
     { at: 100 / 576, side: 1, offset: 1.8 },
     { at: 302 / 576, side: -1, offset: 1.8 },
