@@ -1114,3 +1114,26 @@ Transitions account for tyre type, speed, cornering forces, terrain, impacts, ai
 
 ## 24.13 Engineering
 Inspect before changing; reusable modules; shared collision and hazard rules for humans and AI; deterministic fixed-timestep simulation; no frame-rate dependence; simplified collision shapes. Tests for collision resolution, wobble thresholds, airborne/landing, hazard triggers, stun durations, recovery, invulnerability, and checkpoint/lap preservation after crashes. Run type checking, tests and the production build; test in the browser. Update PROGRESS.md. Stop after this milestone for playtesting, and never claim incomplete features are finished.
+
+---
+
+# 25. As-built summary (handover, 2026-11-21)
+
+This section records how the brief has actually been implemented so far. Where it differs from earlier sections, earlier sections remain the *requirements*; this describes the *current game*. Full detail, config values and known issues: `docs/HANDOVER.md`.
+
+**Status:** Phase 1 complete. Milestone 1.5 (§24) implemented and awaiting human playtesting. Phases 2–4 not started; no Cloudflare resources exist.
+
+**Gameplay now:**
+- One track, Barangay Dash (576 m, 3 laps default; 1/3/5 selectable), 1 human vs 3 bots (Easy/Normal/Hard). Player starts at the back of the grid.
+- The player always races as a child with the Mountain Bike tyre and wooden stick (customisation UI is Phase 2). Bots use BMX, motorbike, road (adult) and MTB tyres, with both stick types.
+- Tyre handling is a three-state machine — CONTROLLED → UNSTABLE (warning; recoverable by slowing, straightening, Balance) → OUT OF CONTROL (tyre gets away; runner chases and picks it up). Cornering tolerance falls with speed, so flat-out driving costs repeated losses of control.
+- The runner is simulated alongside the tyre; the 70 cm (child) / 100 cm (adult) stick with a half-cylinder scoop only pushes and steers while in contact. Jumps, shoves and stuns break contact.
+- Real airborne motion off humps, mounds, logs, potholes and a dirt ramp; landings scored by impact, lean, steering and air time.
+- Collisions between tyres, runners and sticks for all racers.
+- Hazards on Barangay Dash: 2 cement humps, an old-tyre speed strip, 2 dirt mounds, a log, 3 flat motorbike tyres, 2 frond piles, a dirt ramp, 5 potholes in 2 clusters, 2 mud patches, 2 boost pads, 3 dog poos, roadside canals on both sides of the concrete straight, and 3 street dogs.
+- "Power-ups" are limited to boost pads (no item system).
+- Results, local personal bests and race history; online leaderboards and multiplayer buttons are placeholders.
+
+**Architecture now:** Vite + strict TypeScript + three.js; deterministic render-free simulation in `src/sim` (fixed 60 Hz) driven by `src/game/raceController.ts` with interpolated rendering; data-driven configs in `src/config`; procedural geometry, textures and audio (no external assets except the Google font). Designed so `RaceSession` can later run server-side for authoritative multiplayer.
+
+**Not yet built from earlier sections:** customisation screen (§5), tracks 2–4 (§9), Cloudflare backend, identity, D1 leaderboards (§13–14), multiplayer (§11), gamepad support, verified mobile performance (§16).

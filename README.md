@@ -4,7 +4,7 @@ A colourful 3D browser racing game inspired by **kariling**, the traditional Fil
 
 Race three AI opponents around **Barangay Dash**, a coastal village circuit with dusty lanes, nipa huts, sari-sari stores, fiesta bunting and rice paddies. Manage your speed, stamina and the tyre's balance: take corners too hot and it wobbles (UNSTABLE) and then gets away from you (OUT OF CONTROL) — your runner has to chase it down. Watch out for potholes, mud, logs, humps, a jump, roadside canals, dog poo and the local askals.
 
-> **Status:** Phase 1 and Milestone 1.5 (tyre-control states, collisions, street hazards) are complete and ready for playtesting. See [PROGRESS.md](PROGRESS.md) and [docs/GAME_SPEC.md](docs/GAME_SPEC.md).
+> **Status:** Phase 1 and Milestone 1.5 (tyre-control states, collisions, street hazards) are complete and ready for playtesting. See [docs/HANDOVER.md](docs/HANDOVER.md) (current state, systems, known issues), [PROGRESS.md](PROGRESS.md) and [docs/GAME_SPEC.md](docs/GAME_SPEC.md).
 
 ## Requirements
 

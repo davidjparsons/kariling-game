@@ -1,6 +1,27 @@
 # KARILING — Progress Log
 
-_Last updated: 2026-11-20 (session 2 — Milestone 1.5)_
+_Last updated: 2026-11-21 (end of session 2 — handover). Start a new session with **`docs/HANDOVER.md`**._
+
+## At a glance
+
+**Implemented**
+- Phase 1: single-player Barangay Dash race vs 3 bots, laps/checkpoints/timing, HUD, results, local records, settings, touch + keyboard controls, synthesised audio, Low/Medium/High graphics.
+- Milestone 1.5: three-state tyre control (CONTROLLED/UNSTABLE/OUT OF CONTROL), speed-dependent handling, airborne jumps and landings, simulated runner with stick contact and separation, racer collisions (tyre/runner/stick), 7 obstacle types, potholes, mud, roadside canals with safe respawn, boost pads, street dogs with stun, dog poo with cleaning, hazard-aware AI, debug HUD, upgraded tyre/character/stick/scoop/building models, mobile draw-call optimisation.
+
+**Partially implemented**
+- Customisation: data types, builders and bot looks support every option (age, gender, hair, skin, clothes, footwear, 4 tyres, tyre paint, 2 sticks), but there is **no customisation screen**; the player's loadout is fixed.
+- Tracks: only Barangay Dash. The other three are shown locked.
+- Power-ups: boost pads only; no item/power-up system.
+- Mobile: layout, touch and quality tiers done; **real-device performance and Safari behaviour untested**.
+- Audio: all events have sounds; **never listened to** in testing.
+- Leaderboards: local personal bests only.
+
+**Outstanding**
+- Human playtest and tuning of Milestone 1.5 (next step).
+- Known issues: see `docs/HANDOVER.md` §11 (start-line specks in the menu, canal state hack, lingering banner, a misleading config comment).
+- Phase 2 (customisation UI, 3 tracks, track elevation), Phase 3 (Cloudflare Workers/D1, identity, leaderboards), Phase 4 (Durable Object multiplayer), gamepad support, code splitting.
+
+**Last verified (2026-11-21):** `pnpm typecheck` ✔ · `pnpm lint` ✔ · `pnpm test` ✔ 71/71 · `pnpm build` ✔. Git: local `main` has one unpushed handover commit on top of `d11544a` (pushed).
 
 ## Current phase
 
