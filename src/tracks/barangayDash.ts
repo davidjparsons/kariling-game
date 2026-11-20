@@ -78,6 +78,14 @@ export const BARANGAY_DASH: TrackDefinition = {
     { from: 525 / 576, to: 46 / 576, side: -1 },
     { from: 530 / 576, to: 40 / 576, side: 1 },
   ],
+  // Power-up rows: after the start canals, before the village, before the paddies, after the
+  // flat-tyre slalom. Three boxes across the road so a racer can pick a line.
+  pickups: [
+    { at: 54 / 576, d: [-2.4, 0, 2.4] },
+    { at: 188 / 576, d: [-2.2, 0, 2.2] },
+    { at: 330 / 576, d: [-2.2, 0, 2.2] },
+    { at: 471 / 576, d: [-2.4, 0, 2.4] },
+  ],
   dogs: [
     { at: 100 / 576, side: 1, offset: 1.8 },
     { at: 302 / 576, side: -1, offset: 1.8 },

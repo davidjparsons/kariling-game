@@ -7,8 +7,11 @@ import { AI_PROFILES, BotController, type Difficulty } from './ai';
 import { resolveRacerCollisions } from './collisions';
 import { createDogs, updateDogs, type Dog, type DogEvent, type DogNav, type DogTarget } from './dogs';
 import { HazardField, type Hazard } from './hazards';
+import { collectPickup, createPickups, tickPickups, touchedPickup, type Pickup } from './pickups';
+import { rollItem } from './effects';
+import { Rng } from '../core/rng';
 import {
-  addImpact, applyBoost, applyDirt, applyStun, createRacerState, EV_BOOST, EV_BUMP, EV_HAZARD, EV_LAUNCH, EV_POO,
+  addImpact, applyBoost, applyDirt, applyStun, createRacerState, EV_BOOST, EV_BUMP, EV_HAZARD, EV_ITEM_GET, EV_LAUNCH, EV_POO, giveItem,
   EV_RESPAWN, EV_STUN, NO_INPUT, resetControl, runnerConfig, stepRacer,
   type Ground, type GroundFn, type PhysicsContext, type RacerInput, type RacerPhysicsState,
 } from './physics';
@@ -81,6 +84,7 @@ export class RaceSession {
   readonly track: Track;
   readonly field: HazardField;
   readonly dogs: Dog[];
+  readonly pickups: Pickup[];
   readonly racers: RaceRacer[];
   readonly opts: RaceOptions;
   phase: RacePhase = 'countdown';
@@ -113,6 +117,7 @@ export class RaceSession {
     },
   };
   private dogEventsBuf: DogEvent[] = [];
+  private itemRng: Rng;
 
   constructor(track: Track, setups: RacerSetup[], opts: RaceOptions) {
     if (setups.length === 0 || setups.length > MAX_RACERS) throw new Error('A race needs 1–4 racers');
@@ -120,6 +125,8 @@ export class RaceSession {
     this.opts = opts;
     this.field = new HazardField(track, track.def.hazards ?? [], track.def.canals ?? []);
     this.dogs = createDogs(track, track.def.dogs ?? []);
+    this.pickups = createPickups(track, track.def.pickups ?? []);
+    this.itemRng = new Rng(opts.seed * 7 + 13);
     this.racers = setups.map((setup, i) => {
       // Two-by-two staggered grid behind the start line.
       const row = Math.floor(i / 2);
@@ -203,6 +210,7 @@ export class RaceSession {
       r.hint = proj.index;
       r.lastD = proj.d;
       this.hazardTriggers(r, proj);
+      this.pickupCheck(r);
       this.trackSafePosition(r, proj);
       if (r.phys.needsRespawn) this.respawn(r, true);
       const onTrack = Math.abs(r.lastD) <= this.track.barrierOffset(proj) + 1;
@@ -218,6 +226,7 @@ export class RaceSession {
     }
 
     this.updateDogs(dt);
+    tickPickups(this.pickups, dt);
 
     if (this.phase === 'racing' && this.racers.every((r) => r.progress.finished)) this.phase = 'finished';
   }
@@ -250,6 +259,18 @@ export class RaceSession {
       if (cfg.effect === 'poo' && p.invuln <= 0) { applyDirt(p); r.events |= EV_POO; }
     }
     r.insideHazards = now;
+  }
+
+  /** Empty-handed racers collect a pickup they roll through and get a weighted random item. */
+  private pickupCheck(r: RaceRacer): void {
+    const p = r.phys;
+    if (r.phys.item || p.control === 'lost' || this.phase !== 'racing') return;
+    const box = touchedPickup(this.pickups, p.x, p.y, p.z);
+    if (!box) return;
+    collectPickup(box);
+    const rank = this.standings().indexOf(r);
+    giveItem(p, rollItem(this.itemRng, this.racers.length > 1 ? rank / (this.racers.length - 1) : 0));
+    r.events |= EV_ITEM_GET;
   }
 
   private trackSafePosition(r: RaceRacer, proj: TrackProjection): void {

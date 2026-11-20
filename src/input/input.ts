@@ -1,5 +1,6 @@
 import { clamp } from '../core/math';
 import type { RacerInput } from '../sim/physics';
+import { DoubleTapDetector } from '../sim/effects';
 
 /**
  * Single input abstraction: keyboard and touch both feed the same RacerInput,
@@ -14,12 +15,20 @@ export class InputManager {
   onCamera: (() => void) | null = null;
   onDebug: (() => void) | null = null;
   private disposers: (() => void)[] = [];
+  /** Double-tap on the push control (key or touch button) → one-shot dash. */
+  private tap = new DoubleTapDetector();
+  private pendingDash = false;
+  private pendingItem = false;
+  /** Fired when a dash is triggered (for immediate UI feedback). */
+  onDash: (() => void) | null = null;
 
   constructor() {
     const down = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
       if (!e.repeat) {
+        if (e.code === 'KeyW' || e.code === 'ArrowUp') this.pushPressed(e.timeStamp);
+        if (e.code === 'KeyE' || e.code === 'KeyQ' || e.code === 'Enter') this.pendingItem = true;
         if (e.code === 'Escape' || e.code === 'KeyP') this.onPause?.();
         if (e.code === 'KeyC') this.onCamera?.();
         if (e.code === 'F3' || e.code === 'Backquote') { e.preventDefault(); this.onDebug?.(); }
@@ -38,6 +47,11 @@ export class InputManager {
     });
   }
 
+  /** A fresh press of the push control (ms timestamp). */
+  private pushPressed(ms: number): void {
+    if (this.tap.press(ms / 1000)) { this.pendingDash = true; this.onDash?.(); }
+  }
+
   private resetTouch(): void {
     this.touch = { steer: 0, push: false, brake: false, balance: false };
     this.steerPointers.clear();
@@ -53,7 +67,9 @@ export class InputManager {
     let push = k.has('KeyW') || k.has('ArrowUp') || this.touch.push;
     if (this.autoPush && !brake) push = true;
     const balance = k.has('Space') || k.has('ShiftLeft') || this.touch.balance;
-    return { steer: clamp(steer, -1, 1), push: push ? 1 : 0, brake: brake ? 1 : 0, balance };
+    const dash = this.pendingDash, useItem = this.pendingItem;
+    this.pendingDash = this.pendingItem = false;
+    return { steer: clamp(steer, -1, 1), push: push ? 1 : 0, brake: brake ? 1 : 0, balance, dash, useItem };
   }
 
   /** Wire the on-screen touch controls. */
@@ -98,7 +114,10 @@ export class InputManager {
       if (!el) return;
       const ids = new Set<number>();
       const set = () => { this.touch[name] = ids.size > 0; el.classList.toggle('active', ids.size > 0); };
-      el.addEventListener('pointerdown', (e) => { e.preventDefault(); capture(el, e.pointerId); ids.add(e.pointerId); set(); });
+      el.addEventListener('pointerdown', (e) => {
+        e.preventDefault(); capture(el, e.pointerId); ids.add(e.pointerId); set();
+        if (name === 'push') this.pushPressed(e.timeStamp);
+      });
       const off = (e: PointerEvent) => { ids.delete(e.pointerId); set(); };
       el.addEventListener('pointerup', off);
       el.addEventListener('pointercancel', off);
@@ -108,11 +127,14 @@ export class InputManager {
     hold('brake');
     hold('balance');
     root.querySelector('[data-touch="pause"]')?.addEventListener('click', () => this.onPause?.());
+    root.querySelector('[data-touch="item"]')?.addEventListener('pointerdown', (e) => { e.preventDefault(); this.pendingItem = true; });
   }
 
   clear(): void {
     this.keys.clear();
     this.resetTouch();
+    this.tap.reset();
+    this.pendingDash = this.pendingItem = false;
   }
 
   dispose(): void {

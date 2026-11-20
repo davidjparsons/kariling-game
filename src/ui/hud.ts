@@ -40,6 +40,7 @@ export class Hud {
   constructor(parent: HTMLElement, track: Track, names: string[], showTouch: boolean) {
     this.root = document.createElement('div');
     this.root.className = 'hud';
+    const itemButton = `<button class="hud-item empty" data-touch="item" data-k="item" aria-label="No item"><span data-k="itemIcon"></span><small data-k="itemName"></small>${showTouch ? '' : '<kbd>E</kbd>'}</button>`;
     this.root.innerHTML = `
       <div class="hud-tl">
         <div class="hud-pos"><span data-k="pos">1</span><sup data-k="suf">st</sup><small>/<span data-k="of">4</span></small></div>
@@ -64,17 +65,19 @@ export class Hud {
       </div>
       <div class="hud-center"><div class="hud-msg" data-k="msg"></div></div>
       <div class="hud-tags"></div>
+      ${showTouch ? '' : `<div class="hud-item-wrap">${itemButton}</div>`}
       <div class="touch ${showTouch ? '' : 'hidden'}">
         <div class="touch-left">
           <div class="steer-pad" data-touch="steer"><span class="arrow l">◀</span><span class="arrow r">▶</span></div>
         </div>
         <div class="touch-right">
+          ${showTouch ? itemButton : ''}
           <button class="tbtn balance" data-touch="balance"><span>BALANCE</span></button>
           <button class="tbtn brake" data-touch="brake"><span>BRAKE</span></button>
           <button class="tbtn push" data-touch="push"><span>PUSH</span></button>
         </div>
       </div>
-      <div class="hud-keys ${showTouch ? 'hidden' : ''}">W/↑ push · A D/← → steer · S/↓ brake · Space balance · C camera · Esc pause</div>
+      <div class="hud-keys ${showTouch ? 'hidden' : ''}">W/↑ push (tap twice: dash) · A D/← → steer · S/↓ brake · Space balance · E item · C camera · Esc pause</div>
     `;
     parent.appendChild(this.root);
     this.root.querySelectorAll<HTMLElement>('[data-k]').forEach((e) => { this.el[e.dataset.k!] = e; });

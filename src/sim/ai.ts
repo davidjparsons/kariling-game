@@ -3,6 +3,7 @@ import { SURFACES } from '../config/surfaces';
 import { clamp, damp, wrapAngle } from '../core/math';
 import { Rng } from '../core/rng';
 import { effectiveMaxSpeed, gripLimit, stressThreshold, turnScale, type RacerInput } from './physics';
+import { effectMods } from './effects';
 import { lerp } from '../core/math';
 import type { RaceRacer, RaceSession } from './race';
 
@@ -58,6 +59,8 @@ export class BotController {
   private mistakeTime = 0;
   private mistakeSteer = 0;
   private resting = false;
+  private itemHold = 0;
+  private itemDelay = 1;
   /** Pulling over to clean the tyre: −1 left, +1 right, 0 no. */
   private pullSide = 0;
   /** Hazards this bot failed to notice (rolled once per hazard per lap section). */
@@ -135,6 +138,16 @@ export class BotController {
         limitFromHazards = Math.min(limitFromHazards, Math.sqrt(safe * safe + 2 * 5.5 * Math.max(0, dist - 1)));
       }
     }
+    // Empty-handed: line up with a power-up box ahead.
+    if (!p.item && !pullOver && prof.lineSkill > 0.15) {
+      let bestBox: { d: number; dist: number } | null = null;
+      for (const pk of session.pickups) {
+        if (pk.respawn > 0) continue;
+        const dist = ((pk.s - s) % track.length + track.length) % track.length;
+        if (dist > 2 && dist < 26 && (!bestBox || dist < bestBox.dist || (dist - bestBox.dist < 1 && Math.abs(pk.d - desired) < Math.abs(bestBox.d - desired)))) bestBox = { d: pk.d, dist };
+      }
+      if (bestBox) desired = bestBox.d;
+    }
     const canalNear = (side: number) => field.hasCanal(s, side) || field.hasCanal(s + 10, side);
     let best = desired, bestCost = Infinity;
     for (let c = -hw + 0.9; c <= hw - 0.9; c += 0.25) {
@@ -158,6 +171,8 @@ export class BotController {
 
     // --- Speed planning: stay under the speed-dependent stress threshold ---
     const grip = gripLimit(tyre, surf);
+    // Sugar rush / dash make sharp turns riskier: plan corners more cautiously.
+    const cornerMod = effectMods(p.fx).corner;
     const vTop = effectiveMaxSpeed(tyre, surf) * (p.boost > 0 ? PHYSICS.boostSpeedMul : 1);
     let allowed = vTop;
     const horizon = 8 + p.speed * 2.2;
@@ -166,7 +181,7 @@ export class BotController {
       let vc = 2;
       for (let v = vTop; v > 2; v -= 0.5) {
         const yawCap = tyre.turnRate * self.ctx.stick.steerAssist * turnScale(v, tyre.maxSpeed) * 0.8;
-        const loadOk = (v * v * k) / grip <= stressThreshold(v / tyre.maxSpeed) * prof.cornerSafety * 0.8 * (p.boost > 0 ? 0.8 : 1);
+        const loadOk = (v * v * k) / grip <= stressThreshold(v / tyre.maxSpeed) * prof.cornerSafety * 0.8 * (p.boost > 0 ? 0.8 : 1) / cornerMod;
         if (loadOk && v * k <= yawCap) { vc = v; break; }
       }
       const reach = Math.sqrt(vc * vc + 2 * 5.5 * x);
@@ -226,6 +241,35 @@ export class BotController {
 
     if (this.cruising) { push = Math.min(push, 0.45); balance = p.instability > 0.2; }
 
-    return { steer, push, brake, balance };
+    // --- Items and dash ---
+    const straight = (len: number) => {
+      for (let x = 0; x <= len; x += 4) if (Math.abs(track.sampleAt(s + x).curvature) > 0.018) return false;
+      return true;
+    };
+    const chased = session.dogs.some((d) => (d.state === 'chase' || d.state === 'alert') && d.target === me);
+    let useItem = false;
+    if (p.item && p.itemReveal <= 0 && !this.cruising) {
+      this.itemHold += dt;
+      if (this.itemHold > this.itemDelay) {
+        const calm = p.control === 'controlled';
+        switch (p.item) {
+          case 'buko': useItem = chased || p.instability > 0.3 || blocks.length > 0 || this.itemHold > 12; break;
+          case 'chippy': useItem = calm && straight(20) && p.speed > 4; break;
+          case 'turon': case 'cola': useItem = calm && straight(prof.lineSkill > 0.6 ? 45 : 30) && p.speed > 4; break;
+          case 'skyflakes': useItem = p.instability > 0.33 || p.stamina < 0.45 || this.itemHold > 15; break;
+          case 'pandesal': useItem = p.stamina < 0.55 || this.itemHold > 15; break;
+        }
+      }
+    } else {
+      this.itemHold = 0;
+      this.itemDelay = this.rng.range(0.4, 2.2);
+    }
+    // Dash out of slow sections on straights, if there's stamina to spare.
+    let dash = false;
+    if (!this.cruising && p.control === 'controlled' && p.fx.dashCooldown <= 0 && p.stamina > 0.5 && p.speed > 2 && p.speed < vTop * 0.8 && push > 0.5 && straight(18)) {
+      dash = this.rng.chance(prof.lineSkill * 0.9 * dt);
+    }
+
+    return { steer, push, brake, balance, dash, useItem };
   }
 }

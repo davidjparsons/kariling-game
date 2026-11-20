@@ -1,10 +1,11 @@
 import { BOT_ROSTER, type RacerLoadout } from '../config/appearance';
 import { FIXED_DT, RACE } from '../config/gameplay';
 import { SURFACES } from '../config/surfaces';
+import { ITEMS } from '../config/items';
 import { AI_PROFILES, BotController, type Difficulty } from '../sim/ai';
 import {
   EV_BOOST, EV_BUMP, EV_CANAL, EV_CATCH, EV_CLEAN_START, EV_CLEANED, EV_FALL, EV_LAND, EV_LAUNCH, EV_POO,
-  EV_AIRED, EV_RECOVERED, EV_RESPAWN, EV_SEPARATE, EV_STUN, EV_TAP, EV_UNSTABLE, type RacerInput,
+  EV_AIRED, EV_DASH, EV_ITEM_GET, EV_ITEM_USE, EV_NICE_CATCH, EV_PED, EV_RECOVERED, EV_RESPAWN, EV_SHIELD_BLOCK, EV_SEPARATE, EV_STUN, EV_TAP, EV_UNSTABLE, type RacerInput,
 } from '../sim/physics';
 import { populateGrid, RaceSession, type RaceRacer, type RacerSetup } from '../sim/race';
 import type { Track } from '../sim/track';
@@ -12,6 +13,8 @@ import type { AudioEngine } from '../audio/audio';
 import type { InputManager } from '../input/input';
 import type { ChaseCamera } from '../render/camera';
 import { DogView } from '../render/dogView';
+import { buildParol } from '../render/items';
+import * as THREE from 'three';
 import type { DustSystem } from '../render/effects';
 import type { EnvironmentBuild } from '../render/environment';
 import { RacerView } from '../render/racerView';
@@ -61,6 +64,8 @@ export class RaceController {
   readonly session: RaceSession;
   readonly views: RacerView[] = [];
   readonly dogViews: DogView[] = [];
+  /** Floating parol pickups, one per sim pickup. */
+  private pickupViews: { group: THREE.Group; mats: THREE.MeshStandardMaterial[]; wasActive: boolean; spawnT: number }[] = [];
   readonly hud: Hud;
   private prev: Snapshot[] = [];
   private acc = 0;
@@ -103,6 +108,12 @@ export class RaceController {
       const view = new RacerView(loadout);
       deps.stage.scene.add(view.group);
       this.views.push(view);
+    }
+    for (const pk of this.session.pickups) {
+      const { group, materials } = buildParol();
+      group.position.set(pk.x, 0.75, pk.z);
+      deps.stage.scene.add(group);
+      this.pickupViews.push({ group, mats: materials, wasActive: true, spawnT: 1 });
     }
     this.groundFns = this.session.racers.map((r) => (x: number, z: number) => Math.max(0, this.groundAt(x, z, r.hint, false)));
     for (const d of this.session.dogs) {
@@ -260,6 +271,35 @@ export class RaceController {
         if (me) { this.hud.toast('event', '🐕', 'Bitten!', 1.1, 'bad'); this.shake = 0.3; }
       }
       if (e & EV_RESPAWN) this.sparkle(r, 0xffffff, 14);
+      if (e & EV_DASH) {
+        if (near) a.dash();
+        this.burstDust(r, 8);
+        if (me) this.hud.toast('dash', '💨', 'Dash!', 0.8, 'good');
+      }
+      if (e & EV_NICE_CATCH) {
+        if (near) a.niceCatch();
+        this.sparkle(r, 0xffd54f, 18);
+        view.react('Nice catch!', null, 1.0, '#fff59d');
+        if (me) this.hud.toast('catch', '🎯', 'Nice Catch! +speed', 1.4, 'good');
+      }
+      if (e & EV_ITEM_GET) {
+        if (me) { a.pickup(); this.hud.toast('item', '🎁', 'Item!', 1, 'info'); }
+      }
+      if (e & EV_ITEM_USE && r.phys.lastItem) {
+        const it = ITEMS[r.phys.lastItem];
+        if (near) a.itemUse(it.id);
+        view.showItem(it.id);
+        if (me) this.hud.toast('item', it.icon, `${it.effect}!`, 1.6, 'good');
+      }
+      if (e & EV_SHIELD_BLOCK) {
+        if (near) a.shieldBlock();
+        this.sparkle(r, 0xc5e1a5, 12);
+        if (me) this.hud.toast('shield', '🥥', 'Shield blocked it!', 1.2, 'good');
+      }
+      if (e & EV_PED) {
+        if (near) a.oops();
+        if (me) this.hud.toast('ped', '🚶', 'Watch out for people!', 1.2, 'warn');
+      }
       if (e & EV_BUMP && near && r.bumpImpact > 1) a.bump(r.bumpImpact);
       for (const h of r.hazardHits) {
         if (!near) continue;
@@ -378,6 +418,22 @@ export class RaceController {
             -Math.sin(heading) * 1.2 + (Math.random() - 0.5), 1.2 + Math.random() * 1.2, -Math.cos(heading) * 1.2 + (Math.random() - 0.5), col, 0.45);
         }
       }
+      // Power-up trails: crumbs, fizz, sparkles, dash streaks, landing-bonus glitter.
+      const fx = ph.fx;
+      const trail = (rate: number, color: number, up: number, life: number) => {
+        if (Math.random() < rate * dt) {
+          this.deps.dust.emit(x + (Math.random() - 0.5) * 0.4, ph.y + 0.2 + Math.random() * 0.5, z + (Math.random() - 0.5) * 0.4,
+            (Math.random() - 0.5) * 0.8, up, (Math.random() - 0.5) * 0.8, color, life);
+        }
+      };
+      if (fx.item.chippy > 0) trail(30, Math.random() < 0.5 ? 0xffb300 : 0xffe082, 0.8, 0.5);
+      if (fx.item.cola > 0) trail(34, Math.random() < 0.6 ? 0x5d2e12 : 0xfff3e0, 1.6, 0.55);
+      if (fx.crash > 0) trail(4, 0x8d6e63, 0.2, 0.8);
+      if (fx.item.skyflakes > 0) trail(14, 0x81d4fa, 1.0, 0.6);
+      if (fx.item.pandesal > 0) trail(10, 0xffcc80, 0.8, 0.7);
+      if (fx.item.turon > 0) trail(26, 0xffd54f, 0.6, 0.6);
+      if (fx.dash > 0) trail(40, 0xffffff, 0.3, 0.35);
+      if (fx.bonus > 0) trail(30, 0xfff176, 1.0, 0.5);
       // Cartoon stink trail while racing on with a dirty tyre.
       if (ph.dirt > 0.05 && Math.random() < 9 * ph.dirt * dt) {
         this.deps.dust.emit(x + (Math.random() - 0.5) * 0.3, ph.y + 0.3 + Math.random() * 0.3, z + (Math.random() - 0.5) * 0.3,
@@ -390,6 +446,7 @@ export class RaceController {
     if (dt > 0) this.deps.dust.update(dt);
 
     s.dogs.forEach((d, i) => this.dogViews[i].update(dt, d, Math.max(0, this.groundAt(d.x, d.z, -1, false))));
+    this.updatePickups(dt);
 
     const p = this.player;
     const pi = s.racers.indexOf(p);
@@ -416,6 +473,31 @@ export class RaceController {
     this.hud.updateTags(tagPos, this.deps.camera.camera);
   }
 
+  /** Spin/bob the parol pickups; burst when collected, grow back in when they respawn. */
+  private updatePickups(dt: number): void {
+    const t = this.time;
+    this.session.pickups.forEach((pk, i) => {
+      const v = this.pickupViews[i];
+      const active = pk.respawn <= 0;
+      if (v.wasActive && !active) {
+        for (let k = 0; k < 14; k++) {
+          this.deps.dust.emit(pk.x, 0.75, pk.z, (Math.random() - 0.5) * 3, 1 + Math.random() * 2, (Math.random() - 0.5) * 3, k % 2 ? 0xffd54f : 0xff5252, 0.6);
+        }
+        v.spawnT = 0;
+      }
+      v.wasActive = active;
+      v.group.visible = active;
+      if (!active) return;
+      v.spawnT = Math.min(1, v.spawnT + dt * 2.5);
+      const sc = v.spawnT * (1 + 0.06 * Math.sin(t * 5 + i));
+      v.group.scale.setScalar(sc);
+      v.group.rotation.y = t * 1.8 + i;
+      v.group.position.y = 0.78 + Math.sin(t * 2.4 + i * 0.7) * 0.07;
+      const glow = 0.45 + 0.35 * Math.sin(t * 4 + i);
+      v.mats[0].emissiveIntensity = glow;
+    });
+  }
+
   private updateHud(dt: number): void {
     const s = this.session;
     const p = this.player;
@@ -436,6 +518,7 @@ export class RaceController {
       wrongWay,
       phys: ph,
     });
+    this.updateItemSlot(ph);
     this.hud.tick(dt);
     this.hud.drawMinimap(s.racers, this.playerId);
     const a = this.deps.audio;
@@ -456,7 +539,29 @@ export class RaceController {
     }
   }
 
+  private itemShown: string | null = '';
+  private updateItemSlot(ph: RaceRacer['phys']): void {
+    if (ph.item && ph.itemReveal > 0) {
+      // Roulette: flick through the snacks until the reveal.
+      const ids = Object.keys(ITEMS) as (keyof typeof ITEMS)[];
+      const show = ids[Math.floor(this.time * 14) % ids.length];
+      this.hud.setItemRolling(true);
+      this.hud.setItem(ITEMS[show].icon, '…');
+      this.itemShown = null;
+      return;
+    }
+    this.hud.setItemRolling(false);
+    const key = ph.item ?? '';
+    if (key === this.itemShown) return;
+    this.itemShown = key;
+    this.hud.setItem(ph.item ? ITEMS[ph.item].icon : null, ph.item ? ITEMS[ph.item].name : '');
+  }
+
   dispose(): void {
+    for (const v of this.pickupViews) {
+      this.deps.stage.scene.remove(v.group);
+      v.group.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) { m.geometry.dispose(); (m.material as THREE.Material).dispose(); } });
+    }
     for (const v of this.views) {
       this.deps.stage.scene.remove(v.group);
       v.dispose();

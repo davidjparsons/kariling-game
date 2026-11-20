@@ -9,6 +9,8 @@ import { Runner, type GroundHeightFn, type RunnerMode } from './character';
 import { buildStick, buildTyre } from './kariling';
 import { puffTexture } from './textures';
 import { clamp } from '../core/math';
+import { ITEMS, type ItemId } from '../config/items';
+import { buildItemModel } from './items';
 
 export interface RacerVisualState {
   x: number;
@@ -76,6 +78,13 @@ export class RacerView {
   private stars = new THREE.Group();
   private stink = new THREE.Group();
   private bubble: THREE.Sprite;
+  /** Coconut stability shield around the tyre, and the golden glow of a Golden Roll. */
+  private shield: THREE.Mesh;
+  private golden: THREE.Mesh;
+  /** Snack model that pops up over the runner when an item is used. */
+  private itemPop = new THREE.Group();
+  private itemModels = new Map<ItemId, THREE.Group>();
+  private itemPopTime = 0;
   private bubbleTime = 0;
   private reaction: RunnerMode | null = null;
   private reactionTime = 0;
@@ -151,6 +160,20 @@ export class RacerView {
     }
     this.stink.visible = false;
     this.group.add(this.stink);
+    this.shield = new THREE.Mesh(
+      new THREE.SphereGeometry(this.radius * 1.55, 18, 12),
+      new THREE.MeshStandardMaterial({ color: 0xaed581, emissive: 0x558b2f, emissiveIntensity: 0.4, transparent: true, opacity: 0.22, depthWrite: false, roughness: 0.2 }),
+    );
+    this.shield.visible = false;
+    this.golden = new THREE.Mesh(
+      new THREE.TorusGeometry(this.radius * 1.08, 0.025, 6, 32),
+      new THREE.MeshBasicMaterial({ color: 0xffd54f, transparent: true, opacity: 0.75, depthWrite: false }),
+    );
+    this.golden.rotation.y = Math.PI / 2;
+    this.golden.visible = false;
+    this.tyreRoot.add(this.golden);
+    this.group.add(this.shield, this.itemPop);
+    this.itemPop.visible = false;
     this.bubble = new THREE.Sprite(bubbleMaterial('!'));
     this.bubble.scale.set(0.7, 0.35, 1);
     this.bubble.visible = false;
@@ -175,6 +198,19 @@ export class RacerView {
     this.scoopBackLocal.copy(n).multiplyScalar(rc + this.channelR + 0.02);
     // Lowest point of the scoop shell: its lower end, on the outside of the channel.
     this.scoopLowLocal.copy(n).multiplyScalar(rc + this.channelR).addScaledVector(t, 0.085);
+  }
+
+  /** Pop the used snack up over the runner's head for a moment. */
+  showItem(id: ItemId): void {
+    for (const m of this.itemModels.values()) m.visible = false;
+    let m = this.itemModels.get(id);
+    if (!m) { m = buildItemModel(id); m.scale.setScalar(1.6); this.itemModels.set(id, m); this.itemPop.add(m); }
+    m.visible = true;
+    this.itemPop.visible = true;
+    this.itemPopTime = 1.3;
+    this.bubble.material = bubbleMaterial(ITEMS[id].effect.split(' ')[0] + '!', '#fff59d');
+    this.bubble.visible = true;
+    this.bubbleTime = 1.1;
   }
 
   setForcedMode(mode: RunnerMode | null): void {
@@ -237,8 +273,10 @@ export class RacerView {
     this.runner.ground = v.ground ?? null;
     this.runnerShadow.position.set(v.rx, v.runnerGround + 0.035, v.rz);
     if (this.forcedMode) this.forcedTime += dt;
+    // Sugar rush: frantic legs.
+    const anim = p.fx.item.cola > 0 ? ITEMS.cola.mods.anim ?? 1 : 1;
     this.runner.animate(dt, {
-      speed: mode === 'run' || mode === 'struggle' || mode === 'chase' || mode === 'eww' ? Math.max(p.rSpeed, mode === 'chase' ? 6 : 0) : p.rSpeed,
+      speed: (mode === 'run' || mode === 'struggle' || mode === 'chase' || mode === 'eww' ? Math.max(p.rSpeed, mode === 'chase' ? 6 : 0) : p.rSpeed) * anim,
       pushing: p.pushing,
       lean: p.lean,
       wobble: p.wobble,
@@ -323,6 +361,21 @@ export class RacerView {
 
     // ---------- effects
     const headY = v.runnerGround + this.runner.height + 0.12;
+    this.shield.visible = p.fx.shieldHits > 0 && p.fx.item.buko > 0;
+    if (this.shield.visible) {
+      this.shield.position.set(v.x, p.y + r, v.z);
+      const blink = p.fx.item.buko < 1.5 ? 0.5 + 0.5 * Math.sin(performance.now() / 70) : 1;
+      (this.shield.material as THREE.MeshStandardMaterial).opacity = 0.22 * blink;
+    }
+    this.golden.visible = p.fx.item.turon > 0;
+    if (this.itemPopTime > 0) {
+      this.itemPopTime -= dt;
+      const k = 1 - this.itemPopTime / 1.3;
+      this.itemPop.position.set(v.rx, headY + 0.75 + k * 0.35, v.rz);
+      this.itemPop.rotation.y += dt * 5;
+      this.itemPop.scale.setScalar(Math.min(1, k * 6) * (this.itemPopTime < 0.25 ? this.itemPopTime / 0.25 : 1));
+      if (this.itemPopTime <= 0) this.itemPop.visible = false;
+    }
     this.stars.visible = p.stun > 0;
     if (this.stars.visible) {
       this.stars.position.set(v.rx, headY, v.rz);
@@ -348,7 +401,7 @@ export class RacerView {
   dispose(): void {
     // Runner geometries are cached and shared; dispose its materials plus our own tyre/stick meshes.
     this.runner.dispose();
-    for (const root of [this.tyreRoot, this.shaft, this.scoop, this.stars, this.stink]) {
+    for (const root of [this.tyreRoot, this.shaft, this.scoop, this.stars, this.stink, this.shield, this.itemPop]) {
       root.traverse((o) => {
         const m = o as THREE.Mesh;
         if (m.isMesh) {

@@ -37,6 +37,25 @@ export interface TrackDefinition {
   canals?: CanalPlacement[];
   /** Street-dog hangouts. */
   dogs?: DogPlacement[];
+  /** Rows of power-up pickups: lap fraction + lateral offsets (m). */
+  pickups?: PickupRow[];
+  /** Pedestrian crossings and roadside groups. */
+  pedestrians?: PedestrianPlacement[];
+}
+
+export interface PickupRow {
+  at: number;
+  d: number[];
+}
+
+/** A crossing point (people walk across the road) or a roadside group (people mill about). */
+export interface PedestrianPlacement {
+  kind: 'crossing' | 'group';
+  at: number;
+  /** Side of the road the group stands on / crossers start from. */
+  side: -1 | 1;
+  /** Number of people (adults and children). */
+  count: number;
 }
 
 export interface TrackSample {

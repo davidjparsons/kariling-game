@@ -2,7 +2,9 @@ import { PHYSICS, RACE, STICK_LENGTH } from '../config/gameplay';
 import type { StickConfig } from '../config/sticks';
 import { SURFACES, type SurfaceConfig, type SurfaceId } from '../config/surfaces';
 import type { TyreConfig } from '../config/tyres';
+import { DASH, EFFECT_LIMITS, ITEM_RULES, LANDING_BONUS, NEUTRAL_MODS, type EffectMods, type ItemId } from '../config/items';
 import { approach, clamp, damp, lerp, smoothstep, wrapAngle } from '../core/math';
+import { activateItem, createEffects, effectMods, tickEffects, type ActiveEffects } from './effects';
 
 /** Device-independent racer input. Keyboard, touch and AI all produce this. */
 export interface RacerInput {
@@ -14,6 +16,10 @@ export interface RacerInput {
   brake: number;
   /** Steady the tyre: faster balance recovery, weaker pushing. */
   balance: boolean;
+  /** One-shot: the push control was double-tapped (dash). */
+  dash?: boolean;
+  /** One-shot: use the held item. */
+  useItem?: boolean;
 }
 
 export const NO_INPUT: RacerInput = Object.freeze({ steer: 0, push: 0, brake: 0, balance: false });
@@ -98,6 +104,22 @@ export interface RacerPhysicsState {
   stressCorner: number;
   stressJerk: number;
   stressRough: number;
+
+  // ---- dash, landing bonus, items ----
+  fx: ActiveEffects;
+  /** Held item (one at a time) and the roulette time left before it can be used. */
+  item: ItemId | null;
+  itemReveal: number;
+  /** Most recently used item (for effects/sounds). */
+  lastItem: ItemId | null;
+  /** Launch factor of the ground most recently climbed (ramps ≈ 1). */
+  lastLaunch: number;
+  /** Airborne off a real ramp (eligible for the landing bonus). */
+  rampAir: boolean;
+  /** Seconds left to reconnect the scoop after a clean ramp landing. */
+  catchWindow: number;
+  /** One-shot events raised outside stepRacer (shield blocks), reported on the next step. */
+  pendingEvents: number;
 }
 
 export const EV_TAP = 1;
@@ -121,6 +143,15 @@ export const EV_HAZARD = 1 << 16;
 export const EV_RESPAWN = 1 << 17;
 /** The poo smell wore off by itself while racing on. */
 export const EV_AIRED = 1 << 18;
+export const EV_DASH = 1 << 19;
+/** Ramp jump landed and the scoop reconnected in time: landing bonus. */
+export const EV_NICE_CATCH = 1 << 20;
+export const EV_ITEM_GET = 1 << 21;
+export const EV_ITEM_USE = 1 << 22;
+/** The coconut shield absorbed a hit. */
+export const EV_SHIELD_BLOCK = 1 << 23;
+/** Bumped into a pedestrian. */
+export const EV_PED = 1 << 24;
 
 export interface RunnerConfig {
   stickLength: number;
@@ -172,6 +203,7 @@ export function createRacerState(x: number, z: number, heading: number, runner?:
     stickContact: 1, separated: false, separatedTime: 0,
     pushPhase: 0, pushing: 0, stun: 0, invuln: 0, boost: 0, dirt: 0, cleaning: 0, impact: 0,
     stressCorner: 0, stressJerk: 0, stressRough: 0,
+    fx: createEffects(), item: null, itemReveal: 0, lastItem: null, lastLaunch: 0, rampAir: false, catchWindow: 0, pendingEvents: 0,
   };
 }
 
@@ -228,6 +260,11 @@ export function loseControl(st: RacerPhysicsState, kind: LostKind): number {
  */
 export function addImpact(st: RacerPhysicsState, amount: number, ctx: PhysicsContext): number {
   if (amount <= 0 || st.control === 'lost') return 0;
+  if (st.fx.shieldHits > 0 && amount >= SHIELD_MIN_HIT) {
+    // Coconut shield: soaks up one moderate hit almost completely, then pops.
+    consumeShield(st);
+    amount *= 0.15;
+  }
   const scaled = amount * ctx.tyre.instabilityMul * (st.invuln > 0 ? 0.25 : 1);
   st.impact = Math.max(st.impact, scaled);
   st.instability += scaled;
@@ -240,11 +277,27 @@ export function addImpact(st: RacerPhysicsState, amount: number, ctx: PhysicsCon
 /** Dog catch / cartoon stun. Returns false if the racer is protected. */
 export function applyStun(st: RacerPhysicsState, ctx: PhysicsContext): boolean {
   if (st.invuln > 0 || st.stun > 0 || st.control === 'lost') return false;
+  if (st.fx.shieldHits > 0) { consumeShield(st); st.invuln = Math.max(st.invuln, 1.5); return false; }
   st.stun = PHYSICS.stunTime;
   st.speed *= PHYSICS.stunSpeedKeep;
   st.invuln = PHYSICS.stunTime + PHYSICS.invulnerableAfterStun;
   addImpact(st, PHYSICS.stunInstability / ctx.tyre.instabilityMul, ctx);
   return true;
+}
+
+/** Smallest impact the coconut shield bothers to absorb (it ignores everyday jostles). */
+const SHIELD_MIN_HIT = 0.12;
+
+function consumeShield(st: RacerPhysicsState): void {
+  st.fx.shieldHits--;
+  if (st.fx.shieldHits <= 0) { st.fx.shieldHits = 0; st.fx.item.buko = 0; }
+  st.pendingEvents |= EV_SHIELD_BLOCK;
+}
+
+/** Give a racer an item (from a pickup). The roulette must finish before it can be used. */
+export function giveItem(st: RacerPhysicsState, id: ItemId): void {
+  st.item = id;
+  st.itemReveal = ITEM_RULES.revealTime;
 }
 
 export function applyBoost(st: RacerPhysicsState): void {
@@ -273,6 +326,8 @@ export function resetControl(st: RacerPhysicsState, ctx: PhysicsContext, invuln:
   st.stun = 0;
   st.cleaning = 0;
   st.needsRespawn = false;
+  st.rampAir = false;
+  st.catchWindow = 0;
   st.invuln = Math.max(st.invuln, invuln);
   const fx = Math.sin(st.heading), fz = Math.cos(st.heading);
   st.rx = st.x - fx * ctx.runner.followBack + fz * ctx.runner.followSide;
@@ -293,6 +348,26 @@ export function stepRacer(st: RacerPhysicsState, input: RacerInput, ctx: Physics
   st.invuln = Math.max(0, st.invuln - dt);
   st.boost = Math.max(0, st.boost - dt);
   st.impact = Math.max(0, st.impact - dt * 2);
+  events |= st.pendingEvents;
+  st.pendingEvents = 0;
+  tickEffects(st.fx, dt);
+  st.itemReveal = Math.max(0, st.itemReveal - dt);
+  // Use the held item (any time the tyre isn't loose).
+  if (input.useItem && st.item && st.itemReveal <= 0 && st.control !== 'lost') {
+    st.stamina = Math.min(1, st.stamina + activateItem(st.fx, st.item));
+    st.lastItem = st.item;
+    st.item = null;
+    events |= EV_ITEM_USE;
+  }
+  // Double-tap dash: needs control, stamina and a cooled-down dash.
+  if (input.dash && hasControl(st) && st.fx.dashCooldown <= 0 && st.stamina >= DASH.minStamina) {
+    st.fx.dash = DASH.duration;
+    st.fx.dashCooldown = DASH.cooldown;
+    st.stamina = Math.max(0, st.stamina - DASH.staminaCost);
+    st.instability += DASH.wobbleKick * ctx.tyre.instabilityMul;
+    events |= EV_DASH;
+  }
+  const mods = effectMods(st.fx, modsScratch);
 
   const g0 = ground(st.x, st.z);
   st.surface = g0.surface;
@@ -329,6 +404,7 @@ export function stepRacer(st: RacerPhysicsState, input: RacerInput, ctx: Physics
     const returning = Math.abs(steerIn) < Math.abs(st.steer) || steerIn * st.steer < 0;
     let rate = returning ? PHYSICS.steerReturnRate : lerp(PHYSICS.steerRateLow, PHYSICS.steerRateHigh, Math.min(1, speedNorm));
     if (st.control === 'unstable') rate *= PHYSICS.unstableSteerMul;
+    rate *= mods.steer;
     const prevSteer = st.steer;
     st.steer = approach(st.steer, steerIn, rate * dt);
     const steerJerk = Math.abs(st.steer - prevSteer) / dt;
@@ -341,16 +417,16 @@ export function stepRacer(st: RacerPhysicsState, input: RacerInput, ctx: Physics
     const sf = staminaFactor(st.stamina);
     const boosting = st.boost > 0;
     const vmax = effectiveMaxSpeed(tyre, surface) * (0.94 + 0.06 * sf) * (0.6 + 0.4 * Math.min(1, effPush / Math.max(0.01, contact)))
-      * (boosting ? PHYSICS.boostSpeedMul : 1) * lerp(1, PHYSICS.dirtSpeedMul, dirtK);
+      * Math.min(EFFECT_LIMITS.speedMax, (boosting ? PHYSICS.boostSpeedMul : 1) * mods.speed) * lerp(1, PHYSICS.dirtSpeedMul, dirtK);
     const ratio = st.speed / Math.max(0.1, vmax);
     let drive = 0;
     if (st.grounded && effPush > 0 && ratio < 1) {
       drive = tyre.acceleration * stick.pushPower * surface.accelMul * sf * effPush * (1 - ratio * ratio)
-        * (boosting ? PHYSICS.boostAccelMul : 1);
+        * Math.min(EFFECT_LIMITS.accelMax, (boosting ? PHYSICS.boostAccelMul : 1) * mods.accel);
     }
     if (boosting && st.grounded && ratio < 1) drive = Math.max(drive, 4 * (1 - ratio)); // the boost carries you a bit even unpushed
-    const resist = (st.grounded ? surface.rollingResistance * aff.roll : 0) + PHYSICS.airDrag * st.speed * st.speed;
-    const brakeAcc = st.grounded && control ? clamp(input.brake, 0, 1) * PHYSICS.brakeDecel : 0;
+    const resist = (st.grounded ? surface.rollingResistance * aff.roll * mods.rolling : 0) + PHYSICS.airDrag * st.speed * st.speed;
+    const brakeAcc = st.grounded && control ? clamp(input.brake, 0, 1) * PHYSICS.brakeDecel * mods.brake : 0;
     st.speed = Math.max(0, st.speed + (drive - resist - brakeAcc) * dt);
 
     // ---------------- lateral ----------------
@@ -380,7 +456,7 @@ export function stepRacer(st: RacerPhysicsState, input: RacerInput, ctx: Physics
       const thr = stressThreshold(speedNorm);
       const excess = Math.max(0, load - thr);
       // Saturating: extreme inputs still lose control, but always after a readable wobble.
-      const cornerStress = (PHYSICS.cornerStressGain * excess) / (1 + excess * PHYSICS.cornerStressSoftness);
+      const cornerStress = (PHYSICS.cornerStressGain * excess) / (1 + excess * PHYSICS.cornerStressSoftness) * mods.corner;
       const jerkStress = steerJerk * speedNorm * speedNorm * PHYSICS.steerJerkGain;
       // Lumpy patches (tussocky grass) jolt the tyre even at modest off-road speeds.
       const lumps = Math.max(0, (g0.rough ?? 1) - 1) * aff.rough * (st.speed / 8) ** 2 * PHYSICS.lumpStressGain;
@@ -389,9 +465,9 @@ export function stepRacer(st: RacerPhysicsState, input: RacerInput, ctx: Physics
       st.stressCorner = cornerStress * mul; st.stressJerk = jerkStress * mul; st.stressRough = roughStress * mul;
       const unattended = st.separated && st.speed > 1.5 ? PHYSICS.unattendedInstability : 0;
       const gain = (cornerStress + jerkStress + roughStress) * tyre.instabilityMul * stick.stabilityMul
-        * (boosting ? PHYSICS.boostInstabilityMul : 1) * (1 + PHYSICS.dirtInstabilityMul * dirtK) + unattended;
+        * (boosting ? PHYSICS.boostInstabilityMul : 1) * (1 + PHYSICS.dirtInstabilityMul * dirtK) * mods.instability + unattended;
       const calm = (1 - 0.75 * smoothstep(thr * 0.6, thr, load)) * (steerJerk < 1.5 ? 1 : 0.6);
-      const recovery = tyre.recoveryRate * calm * (balancing ? PHYSICS.balanceRecoveryMul : 1)
+      const recovery = tyre.recoveryRate * calm * mods.recovery * (balancing ? PHYSICS.balanceRecoveryMul : 1)
         * lerp(PHYSICS.recoverySlowMul, PHYSICS.recoveryFastMul, Math.min(1, speedNorm));
       st.instability = Math.max(0, st.instability + (gain - recovery) * dt);
     }
@@ -411,7 +487,7 @@ export function stepRacer(st: RacerPhysicsState, input: RacerInput, ctx: Physics
     // ---------------- stamina + stick rhythm ----------------
     if (effPush > 0.05) {
       const effort = drive / PHYSICS.staminaEffortRef;
-      st.stamina += (PHYSICS.staminaCruiseRegen * (1 - effort) - PHYSICS.staminaDrain * stick.staminaCost * effort) * dt;
+      st.stamina += (PHYSICS.staminaCruiseRegen * (1 - effort) - PHYSICS.staminaDrain * stick.staminaCost * effort * mods.staminaDrain) * dt;
     } else {
       st.stamina += PHYSICS.staminaRegen * dt;
     }
@@ -429,8 +505,21 @@ export function stepRacer(st: RacerPhysicsState, input: RacerInput, ctx: Physics
 
   events |= integrate(st, ctx, ground, dt);
   events |= stepRunner(st, ctx, dt);
+
+  // Ramp landing bonus: the scoop must be back on the tyre within the window after touchdown.
+  if (st.catchWindow > 0) {
+    st.catchWindow = Math.max(0, st.catchWindow - dt);
+    if (st.control === 'lost') st.catchWindow = 0;
+    else if (st.grounded && !st.separated && st.stickContact > 0.6) {
+      st.catchWindow = 0;
+      st.fx.bonus = LANDING_BONUS.duration;
+      events |= EV_NICE_CATCH;
+    }
+  }
   return events;
 }
+
+const modsScratch: EffectMods = { ...NEUTRAL_MODS };
 
 /** OUT OF CONTROL: the loose tyre tumbles/rolls away and falls; the runner chases and picks it up. */
 function stepLost(st: RacerPhysicsState, input: RacerInput, ctx: PhysicsContext, surface: SurfaceConfig, dt: number): number {
@@ -507,6 +596,7 @@ function integrate(st: RacerPhysicsState, ctx: PhysicsContext, ground: GroundFn,
     if (dh >= 0) {
       // Climbing: some of the climb rate is carried as upward velocity (launches off crests).
       st.vy = (dh / dt) * g1.launch;
+      if (dh > 0.0005) st.lastLaunch = g1.launch;
       if (dh > 0.0005) {
         const v2 = st.speed * st.speed - 2 * PHYSICS.gravity * dh * PHYSICS.climbSpeedLoss;
         st.speed = Math.sqrt(Math.max(0, v2));
@@ -523,6 +613,8 @@ function integrate(st: RacerPhysicsState, ctx: PhysicsContext, ground: GroundFn,
         st.grounded = false;
         st.airTime = 0;
         if (st.vy > 0.6 || dh < -0.12) events |= EV_LAUNCH;
+        // Only a real ramp take-off qualifies for the landing bonus (not humps, logs or kicks).
+        st.rampAir = st.control !== 'lost' && st.lastLaunch >= LANDING_BONUS.minLaunch && st.vy >= LANDING_BONUS.minTakeoffVy;
       }
     }
   } else {
@@ -531,6 +623,7 @@ function integrate(st: RacerPhysicsState, ctx: PhysicsContext, ground: GroundFn,
     st.airTime += dt;
     if (st.y <= g1.h) {
       const impactV = Math.max(0, -st.vy);
+      const airTime = st.airTime;
       st.y = g1.h;
       st.grounded = true;
       events |= EV_LAND;
@@ -549,6 +642,12 @@ function integrate(st: RacerPhysicsState, ctx: PhysicsContext, ground: GroundFn,
       st.speed *= 1 - Math.min(0.15, impactV * 0.015);
       events |= addImpact(st, severity, ctx);
       if (severity > 0.15) events |= EV_BUMP;
+      // One chance per jump: a clean landing opens the catch window, a botched one doesn't.
+      if (st.rampAir && airTime >= LANDING_BONUS.minAirTime && severity <= LANDING_BONUS.maxSeverity && st.control !== 'lost') {
+        st.catchWindow = LANDING_BONUS.catchWindow;
+      }
+      st.rampAir = false;
+      st.lastLaunch = 0;
     }
   }
   if (g1.canal && st.y < -0.25 && !(st.control === 'lost' && st.lostKind === 'canal')) {

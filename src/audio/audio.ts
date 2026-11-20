@@ -235,6 +235,59 @@ export class AudioEngine {
     }
   }
 
+  /** Double-tap dash: quick rising swish. */
+  dash(): void {
+    this.burst(1600, 0.8, 0.22, 0.22, 0, 'bandpass');
+    this.tone(260, 'triangle', 0.08, 0.2, 0, 620);
+  }
+  /** Ramp landing bonus: bright arpeggio + sparkle. */
+  niceCatch(): void {
+    [784, 988, 1319, 1568].forEach((f, i) => this.tone(f, 'triangle', 0.11, 0.14, i * 0.055));
+    this.burst(5000, 2, 0.06, 0.25, 0.2, 'highpass');
+  }
+  /** Pickup collected: roulette ticks then a ding. */
+  pickup(): void {
+    for (let i = 0; i < 7; i++) this.tone(900 + (i % 2) * 300, 'square', 0.035, 0.04, i * 0.13);
+    this.tone(1320, 'sine', 0.12, 0.3, 0.95);
+  }
+  /** Item used — each snack has its own sound. */
+  itemUse(id: string): void {
+    switch (id) {
+      case 'chippy': // crunchy corn chips
+        for (let i = 0; i < 5; i++) this.burst(2800 + Math.random() * 1500, 1.5, 0.22, 0.05, i * 0.07, 'bandpass');
+        break;
+      case 'cola': // fizz + slurp
+        this.burst(6000, 0.7, 0.18, 0.7, 0, 'highpass');
+        this.tone(300, 'sine', 0.1, 0.35, 0.1, 700);
+        break;
+      case 'buko': // hollow coconut knock
+        this.tone(420, 'sine', 0.2, 0.18, 0, 380);
+        this.tone(420, 'sine', 0.16, 0.18, 0.16, 380);
+        break;
+      case 'turon': // golden shimmer
+        [660, 880, 1100, 1320].forEach((f, i) => this.tone(f, 'sine', 0.07, 0.25, i * 0.04));
+        break;
+      default: // munch
+        this.burst(900, 1.2, 0.18, 0.08, 0, 'lowpass');
+        this.burst(900, 1.2, 0.16, 0.08, 0.14, 'lowpass');
+        this.tone(660, 'triangle', 0.08, 0.2, 0.25, 990);
+    }
+  }
+  shieldBlock(): void {
+    this.tone(520, 'sine', 0.18, 0.25, 0, 260);
+    this.burst(3000, 3, 0.1, 0.1);
+  }
+  /** Basketball bounce on the court (positional volume from the caller). */
+  dribble(vol: number): void {
+    this.tone(110, 'sine', 0.25 * vol, 0.09, 0, 70);
+    this.burst(500, 2, 0.08 * vol, 0.04, 0, 'lowpass');
+  }
+  /** Cartoon "whoa!" when brushing past a pedestrian. */
+  oops(): void {
+    this.tone(700, 'triangle', 0.08, 0.22, 0, 420);
+    this.tone(500, 'triangle', 0.06, 0.18, 0.12, 300);
+  }
+
   // ------------------------------------------------------------------ music
   /**
    * Original procedural tune: a bouncy 2/4 "rondalla"-flavoured loop — plucked bandurria-like
