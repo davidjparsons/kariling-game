@@ -22,6 +22,8 @@ export interface Dog {
   target: number;
   /** Idle sub-pose seed: 0 = lying, 1 = sitting, 2 = wandering. */
   pose: number;
+  /** Time until the next warning bark while chasing. */
+  barkTimer: number;
 }
 
 /** What a dog needs to know about each racer. */
@@ -35,10 +37,21 @@ export interface DogTarget {
   protectedFor: number;
   /** Out of control / respawning — not a valid target. */
   busy: boolean;
+  /** Seconds since this racer was last bitten by any dog (Infinity = never). */
+  sinceBitten?: number;
+}
+
+/** Road awareness for chasing dogs: stay between the fences and go round raised obstacles. */
+export interface DogNav {
+  /** True if a dog can't run through this point (log, ramp, mound, canal…). */
+  blocked(x: number, z: number): boolean;
+  /** Pull a point back inside the fences. */
+  clamp(x: number, z: number): [number, number];
 }
 
 export interface DogEvent {
-  type: 'bark' | 'catch' | 'giveUp';
+  /** bark = first warning, growl = still chasing (repeat warning). */
+  type: 'bark' | 'growl' | 'catch' | 'giveUp';
   dog: number;
   racer: number;
 }
@@ -52,19 +65,32 @@ export function createDogs(track: Track, placements: readonly DogPlacement[]): D
     const toRoad = Math.atan2(pt.x - x, pt.z - z);
     return {
       id, homeX: x, homeZ: z, homeHeading: toRoad, x, z, heading: toRoad, speed: 0,
-      state: 'idle', timer: id * 1.7, target: -1, pose: id % 3,
+      state: 'idle', timer: id * 1.7, target: -1, pose: id % 3, barkTimer: 0,
     };
   });
 }
 
-function moveToward(dog: Dog, tx: number, tz: number, speed: number, dt: number): number {
+const AVOID = [0, 0.6, -0.6, 1.2, -1.2, 1.8, -1.8];
+
+function moveToward(dog: Dog, tx: number, tz: number, speed: number, dt: number, nav?: DogNav): number {
   const dx = tx - dog.x, dz = tz - dog.z;
   const dist = Math.hypot(dx, dz);
   if (dist > 1e-4) {
     const step = Math.min(dist, speed * dt);
-    dog.x += (dx / dist) * step;
-    dog.z += (dz / dist) * step;
-    const want = Math.atan2(dx, dz);
+    let ux = dx / dist, uz = dz / dist;
+    if (nav) {
+      // Look a little ahead; swerve round obstacles instead of running through them.
+      const look = Math.max(0.6, step * 6);
+      for (const a of AVOID) {
+        const c = Math.cos(a), s = Math.sin(a);
+        const vx = ux * c + uz * s, vz = -ux * s + uz * c;
+        if (!nav.blocked(dog.x + vx * look, dog.z + vz * look)) { ux = vx; uz = vz; break; }
+      }
+    }
+    dog.x += ux * step;
+    dog.z += uz * step;
+    if (nav) [dog.x, dog.z] = nav.clamp(dog.x, dog.z);
+    const want = Math.atan2(ux, uz);
     dog.heading += wrapAngle(want - dog.heading) * (1 - Math.exp(-12 * dt));
     dog.speed = step / dt;
   } else {
@@ -78,7 +104,8 @@ function moveToward(dog: Dog, tx: number, tz: number, speed: number, dt: number)
  * first, chase briefly, and always head home afterwards with a cooldown — so a racer can
  * outrun them, avoid them, or at worst be caught once.
  */
-export function updateDogs(dogs: Dog[], racers: readonly DogTarget[], dt: number, out: DogEvent[] = []): DogEvent[] {
+export function updateDogs(dogs: Dog[], racers: readonly DogTarget[], dt: number, out: DogEvent[] = [], nav?: DogNav): DogEvent[] {
+  const fair = (r: DogTarget) => !r.busy && (r.sinceBitten ?? Infinity) >= DOG.rebiteGrace;
   out.length = 0;
   for (const dog of dogs) {
     dog.timer += dt;
@@ -95,7 +122,7 @@ export function updateDogs(dogs: Dog[], racers: readonly DogTarget[], dt: number
         let best = -1;
         let bestD: number = DOG.triggerRadius;
         racers.forEach((r, i) => {
-          if (r.busy) return;
+          if (!fair(r)) return;
           const d = Math.hypot(r.x - dog.x, r.z - dog.z);
           if (d < bestD) { bestD = d; best = i; }
         });
@@ -111,26 +138,33 @@ export function updateDogs(dogs: Dog[], racers: readonly DogTarget[], dt: number
         dog.speed = 0;
         const t = racers[dog.target];
         dog.heading += wrapAngle(Math.atan2(t.rx - dog.x, t.rz - dog.z) - dog.heading) * (1 - Math.exp(-10 * dt));
-        if (dog.timer >= DOG.alertTime) { dog.state = 'chase'; dog.timer = 0; }
+        if (dog.timer >= DOG.alertTime) { dog.state = 'chase'; dog.timer = 0; dog.barkTimer = DOG.barkEvery; }
         break;
       }
       case 'chase': {
         const t = racers[dog.target];
-        const dist = moveToward(dog, t.rx, t.rz, DOG.chaseSpeed, dt);
+        // A sprint that tires: slow racers get run down, fast ones pull away.
+        const k = Math.min(1, dog.timer / DOG.maxChaseTime);
+        const speed = DOG.chaseSpeed + (DOG.chaseSpeedEnd - DOG.chaseSpeed) * k;
+        const dist = moveToward(dog, t.rx, t.rz, speed, dt, nav);
         const fromHome = Math.hypot(dog.x - dog.homeX, dog.z - dog.homeZ);
+        dog.barkTimer -= dt;
         if (dist < DOG.catchDistance) {
-          if (t.protectedFor <= 0 && !t.busy) out.push({ type: 'catch', dog: dog.id, racer: dog.target });
+          if (t.protectedFor <= 0 && fair(t)) out.push({ type: 'catch', dog: dog.id, racer: dog.target });
           dog.state = 'return';
           dog.timer = 0;
-        } else if (dog.timer > DOG.maxChaseTime || fromHome > DOG.leash || t.busy) {
+        } else if (dog.timer > DOG.maxChaseTime || fromHome > DOG.leash || !fair(t)) {
           dog.state = 'return';
           dog.timer = 0;
           out.push({ type: 'giveUp', dog: dog.id, racer: dog.target });
+        } else if (dog.barkTimer <= 0) {
+          dog.barkTimer = DOG.barkEvery;
+          out.push({ type: 'growl', dog: dog.id, racer: dog.target });
         }
         break;
       }
       case 'return': {
-        const dist = moveToward(dog, dog.homeX, dog.homeZ, DOG.returnSpeed, dt);
+        const dist = moveToward(dog, dog.homeX, dog.homeZ, DOG.returnSpeed, dt, nav);
         if (dist < 0.2) { dog.state = 'cooldown'; dog.timer = 0; dog.target = -1; }
         break;
       }

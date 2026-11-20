@@ -34,8 +34,10 @@ export interface HazardConfig {
 
 export const HAZARDS: Record<HazardType, HazardConfig> = {
   cementHump: {
-    name: 'Cement hump', length: 1.6, width: 0, height: 0.13, profile: 'flatTop', launch: 0.45,
-    speedLoss: 0.06, instability: 0.04, instabilitySpeed: 0.22, kick: 0, avoid: false, safeSpeed: 8.5,
+    // Painted speed hump: tall enough to bounce the tyre and cost momentum, with long cosine
+    // ramps so it is never a wall.
+    name: 'Cement hump', length: 2.1, width: 0, height: 0.18, profile: 'flatTop', launch: 0.5,
+    speedLoss: 0.08, instability: 0.05, instabilitySpeed: 0.28, kick: 0, avoid: false, safeSpeed: 8,
   },
   dirtMound: {
     name: 'Dirt mound', length: 3.4, width: 2.8, height: 0.42, profile: 'mound', launch: 0.7,
@@ -46,12 +48,13 @@ export const HAZARDS: Record<HazardType, HazardConfig> = {
     speedLoss: 0.2, instability: 0.08, instabilitySpeed: 0.4, kick: 0.6, avoid: true, safeSpeed: 6,
   },
   tyreStrip: {
-    name: 'Old-tyre hump', length: 0.9, width: 0, height: 0.1, profile: 'ridges', launch: 0.3,
+    name: 'Old-tyre hump', length: 1.0, width: 0, height: 0.14, profile: 'ridges', launch: 0.35,
     speedLoss: 0.08, instability: 0.05, instabilitySpeed: 0.3, kick: 0.4, avoid: false, safeSpeed: 8,
   },
   flatTyre: {
-    name: 'Old motorbike tyre', length: 0.8, width: 0.8, height: 0.1, profile: 'ring', launch: 0.3,
-    speedLoss: 0.08, instability: 0.06, instabilitySpeed: 0.32, kick: 0.9, avoid: true, safeSpeed: 6,
+    // Lies flat; its full tyre wall stands ~16 cm proud so rolling over it is a real jolt.
+    name: 'Old motorbike tyre', length: 0.84, width: 0.84, height: 0.16, profile: 'ring', launch: 0.4,
+    speedLoss: 0.1, instability: 0.07, instabilitySpeed: 0.36, kick: 1.1, avoid: true, safeSpeed: 6,
   },
   fronds: {
     name: 'Fallen fronds', length: 2.6, width: 2.4, height: 0.04, profile: 'flat', launch: 0,
@@ -89,14 +92,21 @@ export const CANAL = {
 
 /** Askal (street dog) behaviour. */
 export const DOG = {
-  triggerRadius: 8,
+  triggerRadius: 9,
   alertTime: 0.75,
-  chaseSpeed: 9.6,
-  maxChaseTime: 3.4,
+  /** Sprint speed at the start of a chase (m/s); the dog tires towards `chaseSpeedEnd`. */
+  chaseSpeed: 10.6,
+  chaseSpeedEnd: 7.8,
+  /** Longest chase (s): long enough to run down a slow racer, short enough to outrun. */
+  maxChaseTime: 6,
   /** Dogs give up this far from home (m). */
-  leash: 38,
+  leash: 65,
   catchDistance: 0.9,
-  returnSpeed: 3,
+  returnSpeed: 3.2,
   cooldown: 9,
   wanderRadius: 2.5,
+  /** A racer a dog has just bitten is ignored by every dog for this long (s) — no repeat stuns. */
+  rebiteGrace: 14,
+  /** Warning barks while chasing (s). */
+  barkEvery: 1.4,
 } as const;

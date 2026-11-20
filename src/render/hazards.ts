@@ -36,10 +36,21 @@ export function buildHazards(field: HazardField, shadows: boolean): HazardBuild 
     const wid = h.fullWidth ? hw * 2 + 0.6 : h.halfWid * 2;
     switch (h.type) {
       case 'cementHump': {
-        const g = extrudeProfile(h, wid, 24);
-        // Painted yellow/black warning stripes across the hump.
-        colorByX(g, wid, 0.5, [0xf2c230, 0x2a2a2a], 0xbdb8ad);
+        // Split across the road so each painted band gets its own triangles.
+        const g = extrudeProfile(h, wid, 28, Math.ceil(wid / 0.55));
+        // Painted yellow/black warning stripes across the hump, weathered concrete flanks.
+        colorByX(g, wid, 0.55, [0xf5c518, 0x262626], 0x9d988f);
         b.add(g, concrete, base);
+        // Cat's-eye road studs along the crown and a worn concrete apron each side.
+        const top = h.cfg.height;
+        const stud = new THREE.BoxGeometry(0.12, 0.03, 0.09);
+        for (let x = -wid / 2 + 0.55; x < wid / 2 - 0.3; x += 1.1) {
+          b.add(stud, M.vc, mat4(x, top + 0.012, -h.halfLen * 0.3).premultiply(base), 0xfff3c4);
+          b.add(stud, M.vc, mat4(x, top + 0.012, h.halfLen * 0.3).premultiply(base), 0xfff3c4);
+        }
+        for (const sz of [-1, 1]) {
+          b.add(new THREE.BoxGeometry(wid, 0.012, 0.35), M.vcFlat, mat4(0, 0.006, sz * (h.halfLen + 0.15)).premultiply(base), 0x8f8a80);
+        }
         break;
       }
       case 'tyreStrip': {
@@ -118,8 +129,14 @@ export function buildHazards(field: HazardField, shadows: boolean): HazardBuild 
         break;
       }
       case 'flatTyre': {
-        const g = flatTyreGeometry(0.36, 0.085);
-        b.add(g, M.vcDouble, mat4(0, 0.005, 0, rng.range(0, 6), 0, rng.range(-0.06, 0.06)).premultiply(base), 0x2a2a2c);
+        // Lying flat on the road: the whole section sits above the surface (not half-buried),
+        // slightly squashed like a deflated tyre.
+        const tube = 0.085;
+        const g = flatTyreGeometry(0.36, tube);
+        const lift = tube * 1.04 * 0.92;
+        b.add(g, M.vcDouble, mat4(0, lift, 0, rng.range(0, 6), 0, rng.range(-0.04, 0.04), 1, 0.92, 1).premultiply(base), 0x2a2a2c);
+        // Faded paint band so it reads against the dirt.
+        b.add(new THREE.TorusGeometry(0.265, 0.012, 4, 28).rotateX(Math.PI / 2), M.vc, mat4(0, lift * 2 - 0.004, 0).premultiply(base), 0xd8b23a);
         break;
       }
       case 'fronds': {
@@ -315,7 +332,7 @@ function flipFaces(g: THREE.BufferGeometry): void {
 }
 
 /** Extrude the hazard's along-track height profile across its width (local x). */
-function extrudeProfile(h: Hazard, width: number, steps: number): THREE.BufferGeometry {
+function extrudeProfile(h: Hazard, width: number, steps: number, acrossSteps = 1): THREE.BufferGeometry {
   const shape = new THREE.Shape();
   shape.moveTo(-h.halfLen, 0);
   for (let i = 0; i <= steps; i++) {
@@ -324,7 +341,7 @@ function extrudeProfile(h: Hazard, width: number, steps: number): THREE.BufferGe
   }
   shape.lineTo(h.halfLen, 0);
   shape.closePath();
-  const g = new THREE.ExtrudeGeometry(shape, { depth: width, bevelEnabled: false, steps: 1 });
+  const g = new THREE.ExtrudeGeometry(shape, { depth: width, bevelEnabled: false, steps: acrossSteps });
   // Shape is in XY (x = along, y = up); extrusion along +Z. Map to local: along → +z, across → x.
   g.translate(0, 0, -width / 2);
   g.rotateY(-Math.PI / 2);

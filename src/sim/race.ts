@@ -4,7 +4,7 @@ import { TYRES, type TyreId } from '../config/tyres';
 import { clamp, wrapAngle, wrapDelta } from '../core/math';
 import { AI_PROFILES, BotController, type Difficulty } from './ai';
 import { resolveRacerCollisions } from './collisions';
-import { createDogs, updateDogs, type Dog, type DogEvent, type DogTarget } from './dogs';
+import { createDogs, updateDogs, type Dog, type DogEvent, type DogNav, type DogTarget } from './dogs';
 import { HazardField, type Hazard } from './hazards';
 import {
   addImpact, applyBoost, applyDirt, applyStun, createRacerState, EV_BOOST, EV_BUMP, EV_HAZARD, EV_LAUNCH, EV_POO,
@@ -50,6 +50,8 @@ export interface RaceRacer {
   insideHazards: Set<number>;
   /** Hazard types hit since the last frame (for effects/audio). */
   hazardHits: Hazard[];
+  /** Sim clock (s) of the last dog bite (−Infinity = never). */
+  lastBitten: number;
 }
 
 export type RacePhase = 'countdown' | 'racing' | 'finished';
@@ -90,6 +92,26 @@ export class RaceSession {
   dogEvents: DogEvent[] = [];
   private dogTargets: DogTarget[] = [];
   private scratch: Hazard[] = [];
+  private navScratch: Hazard[] = [];
+  private dogHint = -1;
+  /** Dogs keep to the road between the fences and run round logs, ramps, mounds and canals. */
+  private dogNav: DogNav = {
+    blocked: (x, z) => {
+      const pj = this.track.project(x, z, this.dogHint);
+      if (this.field.inCanal(pj.s, pj.d, pj.halfWidth)) return true;
+      return this.field.hazardsAt(pj.s, pj.d, this.navScratch).some((h) => h.cfg.height >= 0.2);
+    },
+    clamp: (x, z) => {
+      const pj = this.track.project(x, z, this.dogHint);
+      this.dogHint = pj.index;
+      const lim = this.track.barrierOffset(pj) - 0.35;
+      if (Math.abs(pj.d) <= lim) return [x, z];
+      const pt = this.track.pointAt(pj.s);
+      const over = Math.abs(pj.d) - lim;
+      return [x - pt.nx * Math.sign(pj.d) * over, z - pt.nz * Math.sign(pj.d) * over];
+    },
+  };
+  private dogEventsBuf: DogEvent[] = [];
 
   constructor(track: Track, setups: RacerSetup[], opts: RaceOptions) {
     if (setups.length === 0 || setups.length > MAX_RACERS) throw new Error('A race needs 1–4 racers');
@@ -114,9 +136,14 @@ export class RaceSession {
         progress: createProgress(proj.s, track.length),
         bot: setup.isBot ? new BotController(AI_PROFILES[opts.difficulty], opts.seed * 31 + i * 7919, lane * 0.6) : null,
         lastD: proj.d, hint: proj.index, events: 0, bumpImpact: 0, stuckTime: 0, wrongWayTime: 0, respawns: 0,
-        safeS: proj.s, safeD: proj.d, insideHazards: new Set<number>(), hazardHits: [],
+        safeS: proj.s, safeD: proj.d, insideHazards: new Set<number>(), hazardHits: [], lastBitten: -Infinity,
       };
     });
+  }
+
+  /** Simulation clock in seconds since the session was created (countdown included). */
+  get clock(): number {
+    return this.tick * FIXED_DT;
   }
 
   get(id: string): RaceRacer | undefined {
@@ -235,13 +262,14 @@ export class RaceSession {
       this.dogTargets.push({
         x: r.phys.x, z: r.phys.z, rx: r.phys.rx, rz: r.phys.rz, protectedFor: r.phys.invuln,
         busy: r.phys.control === 'lost' || r.progress.finished || this.phase !== 'racing',
+        sinceBitten: this.clock - r.lastBitten,
       });
     }
-    this.dogEvents = [...updateDogs(this.dogs, this.dogTargets, dt)];
+    this.dogEvents = [...updateDogs(this.dogs, this.dogTargets, dt, this.dogEventsBuf, this.dogNav)];
     for (const e of this.dogEvents) {
       if (e.type !== 'catch') continue;
       const r = this.racers[e.racer];
-      if (applyStun(r.phys, r.ctx)) r.events |= EV_STUN;
+      if (applyStun(r.phys, r.ctx)) { r.events |= EV_STUN; r.lastBitten = this.clock; }
     }
   }
 

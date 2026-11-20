@@ -275,6 +275,10 @@ export class RaceController {
         dv.say('ARF! ARF!', 1.0, '#fff59d');
         if (close) a.bark();
         if (ev.racer === s.racers.indexOf(p)) this.hud.toast('dog', '🐕', 'Askal! Outrun it!', 1.6, 'warn');
+      } else if (ev.type === 'growl') {
+        dv.say('ARF!', 0.6, '#fff59d');
+        if (close) a.bark();
+        if (ev.racer === s.racers.indexOf(p)) this.hud.toast('dog', '🐕', 'Askal on your heels!', 1.5, 'warn');
       } else if (ev.type === 'catch') {
         dv.say('GRRR!', 0.8);
         if (close) a.bark();
