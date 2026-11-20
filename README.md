@@ -2,9 +2,9 @@
 
 A colourful 3D browser racing game inspired by **kariling**, the traditional Filipino childhood game where kids run alongside an upright bicycle tyre, pushing and steering it with a stick.
 
-Race three AI opponents around **Barangay Dash**, a coastal village circuit with dusty lanes, nipa huts, sari-sari stores, fiesta bunting and rice paddies. Manage your speed, stamina and the tyre's balance: take corners too hot and it wobbles and falls.
+Race three AI opponents around **Barangay Dash**, a coastal village circuit with dusty lanes, nipa huts, sari-sari stores, fiesta bunting and rice paddies. Manage your speed, stamina and the tyre's balance: take corners too hot and it wobbles (UNSTABLE) and then gets away from you (OUT OF CONTROL) — your runner has to chase it down. Watch out for potholes, mud, logs, humps, a jump, roadside canals, dog poo and the local askals.
 
-> **Status:** Phase 1 (playable single-player) is complete. See [PROGRESS.md](PROGRESS.md) for details and [docs/GAME_SPEC.md](docs/GAME_SPEC.md) for the full design brief.
+> **Status:** Phase 1 and Milestone 1.5 (tyre-control states, collisions, street hazards) are complete and ready for playtesting. See [PROGRESS.md](PROGRESS.md) and [docs/GAME_SPEC.md](docs/GAME_SPEC.md).
 
 ## Requirements
 
@@ -30,9 +30,18 @@ Then open http://localhost:5173. The dev server also listens on your LAN (`--hos
 | Brake | S / ↓ | **BRAKE** |
 | Balance (steady a wobbling tyre) | Space | **BALANCE** |
 | Cycle camera distance | C | Settings |
+| Debug HUD (physics readout) | F3 or \` | Settings → Debug HUD |
 | Pause | Esc / P | ⏸ button |
 
-Tips: ease off the push or tap brake before tight corners; a wobbling tyre (red balance bar) needs a moment of calm or the balance button. Accelerating hard tires the runner; holding a steady speed or coasting recovers stamina. **Auto-push** (Settings) lets younger players just steer.
+Tips:
+- The faster you go, the less steering the tyre tolerates. Ease off or tap brake before tight corners; when the chip says **UNSTABLE**, straighten up, slow down or hold Balance.
+- Small humps are fine; take the big ramp too fast or land leaning and you'll lose it.
+- Steer around potholes, mud and poo. If the tyre gets dirty, stop briefly — the runner cleans it.
+- Keep away from the canal edges on the concrete straight.
+- Barking dog? Speed up — askals give up quickly.
+- Accelerating hard tires the runner; steady speed or coasting recovers stamina. **Auto-push** (Settings) lets younger players just steer.
+
+Add `?debug` to the URL to start with the debug HUD on.
 
 ## Scripts
 

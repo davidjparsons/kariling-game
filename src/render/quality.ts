@@ -10,12 +10,14 @@ export interface QualityProfile {
   foliage: number;
   terrainSegments: number;
   dust: number;
+  /** Trees/palms cast shadows (expensive: their triangles are drawn twice). */
+  foliageShadows: boolean;
 }
 
 export const QUALITY: Record<Quality, QualityProfile> = {
-  low: { pixelRatio: 1, shadows: false, shadowMapSize: 512, grass: 1200, antialias: false, foliage: 0.55, terrainSegments: 90, dust: 120 },
-  medium: { pixelRatio: 1.5, shadows: true, shadowMapSize: 1024, grass: 3500, antialias: true, foliage: 0.8, terrainSegments: 130, dust: 220 },
-  high: { pixelRatio: 2, shadows: true, shadowMapSize: 2048, grass: 8000, antialias: true, foliage: 1, terrainSegments: 170, dust: 320 },
+  low: { pixelRatio: 1, shadows: false, shadowMapSize: 512, grass: 900, antialias: false, foliage: 0.55, terrainSegments: 90, dust: 120, foliageShadows: false },
+  medium: { pixelRatio: 1.5, shadows: true, shadowMapSize: 1024, grass: 2400, antialias: true, foliage: 0.8, terrainSegments: 130, dust: 220, foliageShadows: false },
+  high: { pixelRatio: 2, shadows: true, shadowMapSize: 2048, grass: 8000, antialias: true, foliage: 1, terrainSegments: 170, dust: 320, foliageShadows: true },
 };
 
 export function defaultQuality(): Quality {

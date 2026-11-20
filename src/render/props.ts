@@ -43,11 +43,11 @@ export function palmGeometry(seed: number, height = 7.5): THREE.BufferGeometry {
     new THREE.Vector3(lean, height, 0),
   );
   const segs = 10;
-  const tube = new THREE.TubeGeometry(curve, segs, 0.17, 7, false);
+  const tube = new THREE.TubeGeometry(curve, segs, 0.17, 6, false);
   // taper + ring bands
   const pos = tube.getAttribute('position');
   for (let i = 0; i < pos.count; i++) {
-    const ring = Math.floor(i / 8);
+    const ring = Math.floor(i / 7);
     const t = ring / segs;
     const center = curve.getPoint(Math.min(1, t));
     const k = 1.25 - 0.5 * t;
@@ -62,7 +62,7 @@ export function palmGeometry(seed: number, height = 7.5): THREE.BufferGeometry {
   // coconuts
   for (let i = 0; i < 4; i++) {
     const a = (i / 4) * Math.PI * 2 + rng.range(0, 1);
-    parts.push(part(new THREE.SphereGeometry(0.17, 6, 5), i % 2 ? 0x6b8f2a : 0x7a5a2a,
+    parts.push(part(new THREE.IcosahedronGeometry(0.17, 0), i % 2 ? 0x6b8f2a : 0x7a5a2a,
       mat4(top.x + Math.cos(a) * 0.22, top.y - 0.22, top.z + Math.sin(a) * 0.22)));
   }
   // fronds
@@ -77,7 +77,7 @@ export function palmGeometry(seed: number, height = 7.5): THREE.BufferGeometry {
 }
 
 function frondGeometry(len: number, droop: number, rng: Rng, origin: THREE.Vector3, yaw: number): THREE.BufferGeometry {
-  const steps = 7;
+  const steps = 5;
   const verts: number[] = [];
   const cols: number[] = [];
   const base = new THREE.Color(0x4f9a2c);
@@ -176,21 +176,29 @@ export function bushGeometry(seed: number): THREE.BufferGeometry {
 
 /** A clump of grass blades. */
 export function grassGeometry(): THREE.BufferGeometry {
+  // Curved, tapered blades: each blade is a two-segment strip bending outwards.
   const rng = new Rng(99);
   const verts: number[] = [];
   const cols: number[] = [];
-  const dark = new THREE.Color(0x4e8f2c), light = new THREE.Color(0xa8d84e);
-  for (let i = 0; i < 9; i++) {
+  const dark = new THREE.Color(0x3f7f26), mid = new THREE.Color(0x6fb33a), light = new THREE.Color(0xb6de5a);
+  const push = (v: number[], c: THREE.Color) => { verts.push(...v); cols.push(c.r, c.g, c.b); };
+  for (let i = 0; i < 6; i++) {
     const a = rng.range(0, Math.PI * 2);
-    const r = rng.range(0, 0.18);
+    const r = rng.range(0, 0.16);
     const x = Math.cos(a) * r, z = Math.sin(a) * r;
-    const h = rng.range(0.25, 0.5);
-    const w = 0.05;
-    const lean = rng.range(-0.15, 0.15);
+    const h = rng.range(0.28, 0.55);
+    const w = rng.range(0.035, 0.055);
+    const bend = rng.range(0.08, 0.22);
     const dir = rng.range(0, Math.PI * 2);
     const px = Math.cos(dir) * w, pz = Math.sin(dir) * w;
-    verts.push(x - px, 0, z - pz, x + px, 0, z + pz, x + Math.cos(a) * lean, h, z + Math.sin(a) * lean);
-    cols.push(dark.r, dark.g, dark.b, dark.r, dark.g, dark.b, light.r, light.g, light.b);
+    const ox = Math.cos(a) * bend, oz = Math.sin(a) * bend;
+    const m = [x + ox * 0.35, h * 0.55, z + oz * 0.35];
+    const t = [x + ox, h, z + oz];
+    const b0 = [x - px, 0, z - pz], b1 = [x + px, 0, z + pz];
+    const m0 = [m[0] - px * 0.6, m[1], m[2] - pz * 0.6], m1 = [m[0] + px * 0.6, m[1], m[2] + pz * 0.6];
+    push(b0, dark); push(b1, dark); push(m1, mid);
+    push(b0, dark); push(m1, mid); push(m0, mid);
+    push(m0, mid); push(m1, mid); push(t, light);
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
@@ -237,6 +245,14 @@ export function addNipaHut(b: BatchBuilder, m: THREE.Matrix4, rng: Rng): void {
   b.add(geoBox, M.vc, sub(0, lift, 0, w + 0.3, 0.12, d + 0.3), 0x8a6a3e);
   // walls (woven)
   b.add(geoBox, M.weave, sub(0, lift + wallH / 2, 0, w, wallH, d), 0xffffff);
+  // Bamboo frame on the woven walls.
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+    b.add(post, M.vc, sub(sx * (w / 2 + 0.02), lift + wallH / 2, sz * (d / 2 + 0.02), 1.1, wallH, 1.1), 0xc9a35a);
+  }
+  for (const y of [lift + 0.08, lift + wallH - 0.06]) {
+    b.add(geoBox, M.vc, sub(0, y, d / 2 + 0.03, w + 0.1, 0.07, 0.07), 0xc9a35a);
+    b.add(geoBox, M.vc, sub(0, y, -d / 2 - 0.03, w + 0.1, 0.07, 0.07), 0xc9a35a);
+  }
   // window openings + door (dark insets on front)
   b.add(geoBox, M.vc, sub(-w * 0.22, lift + wallH * 0.55, d / 2 + 0.01, 0.9, 0.7, 0.04), 0x3a2a1a);
   b.add(geoBox, M.vc, sub(w * 0.22, lift + wallH * 0.42, d / 2 + 0.01, 0.75, 1.5, 0.04), 0x4a3320);
@@ -245,6 +261,7 @@ export function addNipaHut(b: BatchBuilder, m: THREE.Matrix4, rng: Rng): void {
   // roof: 4-sided pyramid rotated to align with walls
   const roof = new THREE.ConeGeometry(1, 1, 4, 1, true);
   b.add(roof, M.thatch, sub(0, lift + wallH + 1.05, 0, (w + 1.4) * 0.72, 2.2, (d + 1.4) * 0.72, Math.PI / 4), 0xffffff);
+  b.add(new THREE.ConeGeometry(0.22, 0.35, 6), M.vc, sub(0, lift + wallH + 2.15, 0, 1, 1, 1), 0x7a5a2a);
   // steps
   for (let i = 0; i < 3; i++) {
     b.add(geoBox, M.vc, sub(w * 0.22, 0.25 + i * 0.25, d / 2 + 0.75 - i * 0.22, 0.9, 0.06, 0.28), 0x9a7a4a);
@@ -277,16 +294,32 @@ export function addHouse(b: BatchBuilder, m: THREE.Matrix4, rng: Rng, paint?: nu
   for (const s of [-1, 1]) {
     b.add(tri, M.vcDouble, sub(s * (w / 2 + 0.01), h, 0, 1, 1, 1, Math.PI / 2), color);
   }
-  // door + windows
-  b.add(box, M.vc, sub(-w * 0.25, 1.0, d / 2 + 0.02, 0.9, 2.0, 0.05), rng.pick([0x7b4a2a, 0x2e6fb0, 0x8d2e2e]));
-  for (const wx of [w * 0.12, w * 0.34]) {
-    b.add(box, M.vc, sub(wx, 1.6, d / 2 + 0.03, 0.95, 0.85, 0.05), 0xffffff);
-    b.add(box, M.glass, sub(wx, 1.6, d / 2 + 0.05, 0.8, 0.7, 0.04), 0xffffff);
+  // Darker plinth, roof fascia boards and a front eave.
+  const trim = rng.pick([0xffffff, 0x5d4037, 0x2e6fb0]);
+  b.add(box, M.vc, sub(0, 0.3, 0, w + 0.06, 0.32, d + 0.06), new THREE.Color(color).multiplyScalar(0.72));
+  for (const sz of [-1, 1]) {
+    b.add(box, M.vc, sub(0, h + 0.02, sz * (d / 2 + 0.48), w + 0.85, 0.14, 0.04), trim);
   }
-  b.add(box, M.vc, sub(w / 2 + 0.03, 1.6, 0, 0.05, 0.85, 0.95), 0xffffff);
-  b.add(box, M.glass, sub(w / 2 + 0.05, 1.6, 0, 0.04, 0.7, 0.8), 0xffffff);
-  b.add(box, M.vc, sub(-w / 2 - 0.03, 1.6, 0, 0.05, 0.85, 0.95), 0xffffff);
-  b.add(box, M.glass, sub(-w / 2 - 0.05, 1.6, 0, 0.04, 0.7, 0.8), 0xffffff);
+  // Door with frame and a step.
+  const doorCol = rng.pick([0x7b4a2a, 0x2e6fb0, 0x8d2e2e]);
+  b.add(box, M.vc, sub(-w * 0.25, 1.05, d / 2 + 0.03, 1.06, 2.16, 0.05), trim);
+  b.add(box, M.vc, sub(-w * 0.25, 1.0, d / 2 + 0.05, 0.9, 2.0, 0.05), doorCol);
+  b.add(box, M.vc, sub(-w * 0.25, 1.0, d / 2 + 0.08, 0.06, 0.06, 0.06), 0xd4af37);
+  b.add(box, M.vc, sub(-w * 0.25, 0.08, d / 2 + 0.3, 1.2, 0.16, 0.5), 0x9e9e9e);
+  /** Window: frame, capiz-style panes (pearly squares) and open shutters. */
+  const windowAt = (m: THREE.Matrix4) => {
+    const at = (x: number, y: number, z: number, sx: number, sy: number, sz: number, ry = 0) => mat4(x, y, z, ry, 0, 0, sx, sy, sz).premultiply(m);
+    b.add(box, M.vc, at(0, 0, 0, 1.0, 0.9, 0.06), trim);
+    b.add(box, M.glass, at(0, 0, 0.02, 0.84, 0.74, 0.04), 0xffffff);
+    for (let i = 0; i < 3; i++) for (let k = 0; k < 3; k++) {
+      b.add(box, M.vc, at(-0.27 + i * 0.27, -0.24 + k * 0.24, 0.045, 0.22, 0.19, 0.01), 0xf4efe1);
+    }
+    for (const sx of [-1, 1]) b.add(box, M.vc, at(sx * 0.72, 0, 0.12, 0.44, 0.82, 0.04, sx * 0.5), new THREE.Color(trim).multiplyScalar(0.85));
+    b.add(box, M.vc, at(0, -0.5, 0.08, 1.1, 0.06, 0.18), trim);
+  };
+  for (const wx of [w * 0.12, w * 0.34]) windowAt(mat4(wx, 1.6, d / 2 + 0.03).premultiply(m));
+  windowAt(mat4(w / 2 + 0.03, 1.6, 0, Math.PI / 2).premultiply(m));
+  windowAt(mat4(-w / 2 - 0.03, 1.6, 0, -Math.PI / 2).premultiply(m));
   // potted plants by the door
   for (const px of [-w * 0.25 - 0.8, -w * 0.25 + 0.8]) {
     b.add(new THREE.CylinderGeometry(0.2, 0.15, 0.35, 7), M.vc, sub(px, 0.42, d / 2 + 0.45, 1, 1, 1), 0xb5603a);

@@ -1,7 +1,7 @@
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist', 'node_modules', 'docs'] },
+  { ignores: ['dist', 'node_modules', 'docs', 'tests/_scratch'] },
   ...tseslint.configs.recommended,
   {
     rules: {

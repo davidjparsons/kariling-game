@@ -7,7 +7,7 @@ import { BatchBuilder, mat4 } from './batch';
 import { addWind, sharedMaterials, windUniforms } from './materials';
 import {
   addClothesline, addCourt, addHouse, addNipaHut, addSariSari, bananaGeometry, bushGeometry, grassGeometry, palmGeometry,
-  rockGeometry, treeGeometry, type Footprint,
+  part, rockGeometry, treeGeometry, type Footprint,
 } from './props';
 import type { QualityProfile } from './quality';
 import { checkerTexture, paddyTexture, signTexture, skyTexture, speckleTexture } from './textures';
@@ -504,7 +504,7 @@ export function buildEnvironment(track: Track, q: QualityProfile, seed = 1, fiel
     if (list.length === 0) return;
     const im = new THREE.InstancedMesh(geo, mat, list.length);
     list.forEach((m, i) => im.setMatrixAt(i, m));
-    im.castShadow = cast && q.shadows;
+    im.castShadow = cast && q.shadows && q.foliageShadows;
     im.receiveShadow = true;
     im.computeBoundingSphere();
     group.add(im);
@@ -556,6 +556,23 @@ export function buildEnvironment(track: Track, q: QualityProfile, seed = 1, fiel
   instanced(treeGeometry(5), treeMat, trees, true);
   instanced(bushGeometry(6), treeMat, bushes, false);
   instanced(rockGeometry(7), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, flatShading: true }), rocks, true);
+
+  // Pebbles scattered along the dusty road edges.
+  {
+    const list: THREE.Matrix4[] = [];
+    const n = Math.round(1400 * fol);
+    for (let i = 0; i < n; i++) {
+      const s = rng.range(0, L);
+      const smp = track.sampleAt(s);
+      if (smp.surface === 'paved') continue;
+      const p = track.pointAt(s);
+      const side = rng.chance(0.5) ? 1 : -1;
+      const off = side * (p.halfWidth + rng.range(-0.9, 0.5));
+      const sc = rng.range(0.05, 0.12);
+      list.push(mat4(p.x + p.nx * off, 0.03, p.z + p.nz * off, rng.range(0, 6), rng.range(0, 1), 0, sc, sc * 0.6, sc));
+    }
+    instanced(part(new THREE.OctahedronGeometry(1, 0), 0x9a938a), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, flatShading: true }), list, false);
+  }
 
   // Grass tufts: on the verges and around the course.
   {
