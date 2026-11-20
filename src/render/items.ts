@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { ItemId } from '../config/items';
 
 /**
@@ -98,10 +99,31 @@ export function buildItemModel(id: ItemId): THREE.Group {
 
 /**
  * Power-up pickup: a floating parol (Filipino star lantern) with a glowing centre and paper
- * tails — spins and bobs above the road.
+ * tails — spins and bobs above the road. Merged into ONE vertex-coloured mesh (one draw call per
+ * pickup); all parols share `material`, whose emissive glow the caller can pulse.
  */
-export function buildParol(): { group: THREE.Group; materials: THREE.MeshStandardMaterial[] } {
-  const g = new THREE.Group();
+let parolGeo: THREE.BufferGeometry | null = null;
+let parolMat: THREE.MeshStandardMaterial | null = null;
+
+export function parolMaterial(): THREE.MeshStandardMaterial {
+  if (!parolMat) parolMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.45, emissive: 0xff6d00, emissiveIntensity: 0.35, side: THREE.DoubleSide });
+  return parolMat;
+}
+
+function parolGeometry(): THREE.BufferGeometry {
+  if (parolGeo) return parolGeo;
+  const parts: THREE.BufferGeometry[] = [];
+  const put = (g: THREE.BufferGeometry, color: number, m?: THREE.Matrix4) => {
+    const geo = g.index ? g.toNonIndexed() : g.clone();
+    g.dispose();
+    if (m) geo.applyMatrix4(m);
+    for (const k of Object.keys(geo.attributes)) if (k !== 'position' && k !== 'normal') geo.deleteAttribute(k);
+    const c = new THREE.Color(color), n = geo.getAttribute('position').count, arr = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) { arr[i * 3] = c.r; arr[i * 3 + 1] = c.g; arr[i * 3 + 2] = c.b; }
+    geo.setAttribute('color', new THREE.BufferAttribute(arr, 3));
+    parts.push(geo);
+  };
+  const T = (x: number, y: number, z: number, rz = 0) => new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, rz)), new THREE.Vector3(1, 1, 1));
   const shape = new THREE.Shape();
   for (let i = 0; i < 10; i++) {
     const a = (i / 10) * Math.PI * 2 + Math.PI / 2;
@@ -110,20 +132,19 @@ export function buildParol(): { group: THREE.Group; materials: THREE.MeshStandar
   }
   shape.closePath();
   const star = new THREE.ExtrudeGeometry(shape, { depth: 0.08, bevelEnabled: true, bevelSize: 0.02, bevelThickness: 0.03, bevelSegments: 1 });
-  star.translate(0, 0, -0.04);
-  const paper = new THREE.MeshStandardMaterial({ color: 0xff5252, emissive: 0xff1744, emissiveIntensity: 0.55, roughness: 0.5 });
-  const rim = new THREE.MeshStandardMaterial({ color: 0xffd54f, emissive: 0xffb300, emissiveIntensity: 0.7, roughness: 0.4 });
-  add(g, star, paper);
-  const ring = new THREE.TorusGeometry(0.12, 0.02, 6, 20);
-  add(g, ring, rim, 0, 0, 0.07);
-  add(g, ring, rim, 0, 0, -0.07);
-  add(g, new THREE.CircleGeometry(0.1, 16), new THREE.MeshBasicMaterial({ color: 0xfff8e1 }), 0, 0, 0.075);
-  add(g, new THREE.CircleGeometry(0.1, 16), new THREE.MeshBasicMaterial({ color: 0xfff8e1, side: THREE.BackSide }), 0, 0, -0.075);
-  // Two paper tails.
-  const tail = new THREE.PlaneGeometry(0.05, 0.42);
-  tail.translate(0, -0.21, 0);
-  const tailMat = new THREE.MeshStandardMaterial({ color: 0xffd54f, side: THREE.DoubleSide, emissive: 0x7a5200, emissiveIntensity: 0.3 });
-  add(g, tail, tailMat, -0.06, -0.24, 0, 0, 0, 0.12);
-  add(g, tail, tailMat, 0.06, -0.24, 0, 0, 0, -0.12);
-  return { group: g, materials: [paper, rim] };
+  put(star, 0xff3d3d, T(0, 0, -0.04));
+  put(new THREE.TorusGeometry(0.12, 0.02, 6, 20), 0xffd54f, T(0, 0, 0.07));
+  put(new THREE.TorusGeometry(0.12, 0.02, 6, 20), 0xffd54f, T(0, 0, -0.07));
+  put(new THREE.CircleGeometry(0.1, 16), 0xfff8e1, T(0, 0, 0.075));
+  put(new THREE.CircleGeometry(0.1, 16).rotateY(Math.PI), 0xfff8e1, T(0, 0, -0.075));
+  const tail = () => new THREE.PlaneGeometry(0.05, 0.42).translate(0, -0.21, 0);
+  put(tail(), 0xffd54f, T(-0.06, -0.24, 0, 0.12));
+  put(tail(), 0xffd54f, T(0.06, -0.24, 0, -0.12));
+  parolGeo = mergeGeometries(parts, false)!;
+  parts.forEach((g) => g.dispose());
+  return parolGeo;
+}
+
+export function buildParol(): THREE.Mesh {
+  return new THREE.Mesh(parolGeometry(), parolMaterial());
 }

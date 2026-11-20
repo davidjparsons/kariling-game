@@ -153,7 +153,7 @@ export const LANDING_BONUS = {
   /** Seconds after touchdown to reconnect the scoop. */
   catchWindow: 1.3,
   /** Landing severity above this (instability units) is a botched landing: no bonus. */
-  maxSeverity: 0.45,
+  maxSeverity: 0.68,
   duration: 1.1,
   mods: { accel: 1.45, speed: 1.06 } as Partial<EffectMods>,
 } as const;

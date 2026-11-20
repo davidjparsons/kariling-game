@@ -13,7 +13,7 @@ import type { AudioEngine } from '../audio/audio';
 import type { InputManager } from '../input/input';
 import type { ChaseCamera } from '../render/camera';
 import { DogView } from '../render/dogView';
-import { buildParol } from '../render/items';
+import { buildParol, parolMaterial } from '../render/items';
 import { PedestrianViews } from '../render/pedestrianView';
 import * as THREE from 'three';
 import type { DustSystem } from '../render/effects';
@@ -67,7 +67,7 @@ export class RaceController {
   readonly dogViews: DogView[] = [];
   private pedViews: PedestrianViews;
   /** Floating parol pickups, one per sim pickup. */
-  private pickupViews: { group: THREE.Group; mats: THREE.MeshStandardMaterial[]; wasActive: boolean; spawnT: number }[] = [];
+  private pickupViews: { group: THREE.Mesh; wasActive: boolean; spawnT: number }[] = [];
   readonly hud: Hud;
   private prev: Snapshot[] = [];
   private acc = 0;
@@ -115,10 +115,10 @@ export class RaceController {
     this.pedViews = new PedestrianViews(cfg.track, this.session.pedestrians, cfg.track.def.pedestrians ?? [], groupScale, cfg.seed);
     deps.stage.scene.add(this.pedViews.group);
     for (const pk of this.session.pickups) {
-      const { group, materials } = buildParol();
+      const group = buildParol();
       group.position.set(pk.x, 0.75, pk.z);
       deps.stage.scene.add(group);
-      this.pickupViews.push({ group, mats: materials, wasActive: true, spawnT: 1 });
+      this.pickupViews.push({ group, wasActive: true, spawnT: 1 });
     }
     this.groundFns = this.session.racers.map((r) => (x: number, z: number) => Math.max(0, this.groundAt(x, z, r.hint, false)));
     for (const d of this.session.dogs) {
@@ -505,9 +505,8 @@ export class RaceController {
       v.group.scale.setScalar(sc);
       v.group.rotation.y = t * 1.8 + i;
       v.group.position.y = 0.78 + Math.sin(t * 2.4 + i * 0.7) * 0.07;
-      const glow = 0.45 + 0.35 * Math.sin(t * 4 + i);
-      v.mats[0].emissiveIntensity = glow;
     });
+    parolMaterial().emissiveIntensity = 0.3 + 0.25 * Math.sin(t * 4);
   }
 
   private updateHud(dt: number): void {
@@ -572,10 +571,8 @@ export class RaceController {
   dispose(): void {
     this.deps.stage.scene.remove(this.pedViews.group);
     this.pedViews.dispose();
-    for (const v of this.pickupViews) {
-      this.deps.stage.scene.remove(v.group);
-      v.group.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) { m.geometry.dispose(); (m.material as THREE.Material).dispose(); } });
-    }
+    // Parol geometry/material are shared module-level caches (reused by the next race).
+    for (const v of this.pickupViews) this.deps.stage.scene.remove(v.group);
     for (const v of this.views) {
       this.deps.stage.scene.remove(v.group);
       v.dispose();

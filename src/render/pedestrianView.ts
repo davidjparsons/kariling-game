@@ -44,6 +44,7 @@ export class PedestrianViews {
         const x = cx + pt.tx * Math.cos(a) * r + pt.nx * pl.side * Math.sin(a) * r * 0.6;
         const z = cz + pt.tz * Math.cos(a) * r + pt.nz * pl.side * Math.sin(a) * r * 0.6;
         const v = new Villager(randomLook(rng));
+        v.mesh.castShadow = false; // scenery only: skip the shadow pass on phones
         // Face the middle of the group, turned a little towards the road.
         const heading = Math.atan2(cx - x, cz - z) * 0.6 + Math.atan2(-pt.nx * pl.side, -pt.nz * pl.side) * 0.4;
         v.root.position.set(x, 0, z);
