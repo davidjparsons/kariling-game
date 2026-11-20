@@ -152,8 +152,8 @@ export class RaceController {
     const s = this.session;
     const p = this.player;
     let input: RacerInput = this.deps.input.read();
-    if (this.devAutopilot) input = this.devAutopilot.update(p, s.racers, s.track, FIXED_DT);
-    if (p.progress.finished) input = this.autopilot.update(p, s.racers, s.track, FIXED_DT);
+    if (this.devAutopilot) input = this.devAutopilot.update(p, s.racers, s, FIXED_DT);
+    if (p.progress.finished) input = this.autopilot.update(p, s.racers, s, FIXED_DT);
     const inputs: Record<string, RacerInput> = { [this.playerId]: input };
     const wasCountdown = s.phase === 'countdown';
     s.step(inputs);
@@ -205,7 +205,7 @@ export class RaceController {
     const maxTicks = Math.round(RACE.maxFastForward / FIXED_DT);
     for (let i = 0; i < maxTicks && s.phase !== 'finished'; i++) {
       const p = this.player;
-      s.step({ [this.playerId]: this.autopilot.update(p, s.racers, s.track, FIXED_DT) });
+      s.step({ [this.playerId]: this.autopilot.update(p, s.racers, s, FIXED_DT) });
     }
     this.snapshot();
     const standings = s.standings();
@@ -291,7 +291,7 @@ export class RaceController {
       stamina: p.phys.stamina,
       instability: p.phys.instability,
       wrongWay,
-      fallen: p.phys.mode !== 'racing',
+      fallen: p.phys.control === 'lost',
     });
     this.hud.tick(dt);
     this.hud.drawMinimap(s.racers, this.playerId);
@@ -302,7 +302,7 @@ export class RaceController {
         this.wrongWaySound -= dt;
         if (this.wrongWaySound <= 0) { a.wrongWay(); this.wrongWaySound = 1.2; }
       }
-      if (p.phys.speed > 1 && p.phys.mode === 'racing') {
+      if (p.phys.speed > 1 && p.phys.control !== 'lost' && p.phys.grounded) {
         this.footTimer -= dt;
         if (this.footTimer <= 0) {
           a.footstep(p.phys.surface);

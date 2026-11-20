@@ -65,7 +65,7 @@ export const TYRES: Record<TyreId, TyreConfig> = {
     ratings: { speed: 7, acceleration: 7, stability: 8, cornering: 8 },
     radius: 0.36, tube: 0.07, mass: 1.3,
     maxSpeed: 13.1, acceleration: 7.4, turnRate: 2.25, grip: 11.8,
-    instabilityMul: 0.82, recoveryRate: 0.62, recoveryTime: 1.0,
+    instabilityMul: 0.88, recoveryRate: 0.62, recoveryTime: 1.0,
     affinity: {
       paved: { grip: 0.97, roll: 1.1, speed: 0.98, rough: 1 },
       dirt: { grip: 1.08, roll: 0.85, speed: 1.02, rough: 0.8 },

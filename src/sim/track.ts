@@ -1,5 +1,6 @@
 import type { SurfaceId } from '../config/surfaces';
 import { clamp, lerp, mod, wrapAngle } from '../core/math';
+import type { CanalPlacement, DogPlacement, HazardPlacement } from './hazards';
 
 export interface SurfaceRange {
   /** Start/end as fractions of lap length (0..1). May wrap (from > to). */
@@ -30,6 +31,12 @@ export interface TrackDefinition {
   checkpointCount: number;
   /** Fraction of the lap where the start/finish line sits. */
   startAt: number;
+  /** Obstacles, potholes, mud, boosts and poo (positions relative to the start line). */
+  hazards?: HazardPlacement[];
+  /** Open drainage canals beside the road. */
+  canals?: CanalPlacement[];
+  /** Street-dog hangouts. */
+  dogs?: DogPlacement[];
 }
 
 export interface TrackSample {

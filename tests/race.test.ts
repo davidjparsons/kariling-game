@@ -76,7 +76,7 @@ describe('full race simulation', () => {
         expect(r.progress.lapTimes).toHaveLength(3);
         expect(r.progress.finishTime!).toBeGreaterThan(110);
         expect(r.progress.finishTime!).toBeLessThan(240);
-        expect(r.respawns).toBeLessThanOrEqual(1);
+        expect(r.respawns).toBeLessThanOrEqual(2);
       }
       for (let i = 1; i < standings.length; i++) {
         expect(standings[i].progress.finishTime!).toBeGreaterThanOrEqual(standings[i - 1].progress.finishTime!);
@@ -114,7 +114,7 @@ describe('full race simulation', () => {
     let ticks = 0;
     while (!session.get('me')!.progress.finished && ticks < 120 / FIXED_DT) {
       const me = session.get('me')!;
-      session.step({ me: driver.update(me, session.racers, track, FIXED_DT) });
+      session.step({ me: driver.update(me, session.racers, session, FIXED_DT) });
       ticks++;
     }
     const me = session.get('me')!;

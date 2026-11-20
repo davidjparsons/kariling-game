@@ -93,7 +93,7 @@ export class RacerView {
     this.tyreShadow.rotation.y = h;
 
     // ---------- runner placement: behind and to the left of the tyre
-    const mode: RunnerMode = this.forcedMode ?? (p.mode === 'fallen' ? 'fall' : p.mode === 'recovering' ? 'recover' : p.speed > 0.4 ? 'run' : 'idle');
+    const mode: RunnerMode = this.forcedMode ?? (p.control === 'lost' ? (p.lostPhase === 'pickup' ? 'recover' : 'fall') : p.speed > 0.4 ? 'run' : 'idle');
     const back = mode === 'recover' ? 0.75 : mode === 'fall' ? 1.05 : 1.2 + Math.min(0.25, p.speed * 0.02);
     const leftOff = 0.36 + Math.max(0, -p.lean) * 0.25;
     const tx = v.x - fx * back - rx * leftOff;
@@ -123,7 +123,7 @@ export class RacerView {
       lean: p.lean,
       wobble: p.wobble,
       mode,
-      modeTime: this.forcedMode ? this.forcedTime : p.modeTime,
+      modeTime: this.forcedMode ? this.forcedTime : p.controlTime,
     });
 
     // ---------- stick from hand to the back of the tyre
